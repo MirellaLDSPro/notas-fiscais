@@ -1,0 +1,219 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+const C = {
+  panel: "#161a18",
+  panel2: "#1d2320",
+  line: "#2a312d",
+  ink: "#eef1ee",
+  muted: "#8a9690",
+  accent: "#d4ff4f",
+  accent2: "#5fb89a",
+};
+
+type Item = { href: string; label: string; sub: string };
+const ITEMS: Item[] = [
+  { href: "/", label: "Dashboard", sub: "Painel principal de notas e gastos" },
+  { href: "/receitas", label: "Receitas", sub: "O que cozinhar com suas últimas compras" },
+  { href: "/contato", label: "Contato", sub: "Falar com a autora do projeto" },
+];
+
+export default function Menu() {
+  const [open, setOpen] = useState(false);
+  const pathname = usePathname();
+
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Abrir menu"
+        onClick={() => setOpen(true)}
+        style={{
+          position: "fixed",
+          top: 14,
+          right: 14,
+          zIndex: 30,
+          width: 44,
+          height: 44,
+          background: C.panel,
+          border: `1px solid ${C.line}`,
+          borderRadius: 12,
+          color: C.ink,
+          cursor: "pointer",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 4,
+          padding: 0,
+          boxShadow: "0 4px 16px rgba(0,0,0,.35)",
+        }}
+      >
+        <span
+          style={{
+            width: 18,
+            height: 2,
+            background: C.accent,
+            borderRadius: 2,
+            display: "block",
+          }}
+        />
+        <span
+          style={{
+            width: 18,
+            height: 2,
+            background: C.ink,
+            borderRadius: 2,
+            display: "block",
+          }}
+        />
+        <span
+          style={{
+            width: 18,
+            height: 2,
+            background: C.ink,
+            borderRadius: 2,
+            display: "block",
+          }}
+        />
+      </button>
+
+      {open && (
+        <div
+          onClick={() => setOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,.55)",
+            backdropFilter: "blur(4px)",
+            zIndex: 40,
+            display: "flex",
+            justifyContent: "flex-end",
+          }}
+        >
+          <nav
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: C.panel,
+              borderLeft: `1px solid ${C.line}`,
+              width: "min(320px, 88vw)",
+              height: "100%",
+              padding: "20px 18px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 18,
+              }}
+            >
+              <div
+                style={{
+                  fontFamily: "monospace",
+                  fontSize: 11,
+                  letterSpacing: ".2em",
+                  textTransform: "uppercase",
+                  color: C.accent,
+                }}
+              >
+                Navegação
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                aria-label="Fechar menu"
+                style={{
+                  background: C.panel2,
+                  border: `1px solid ${C.line}`,
+                  color: C.ink,
+                  width: 32,
+                  height: 32,
+                  borderRadius: 8,
+                  cursor: "pointer",
+                  fontSize: 18,
+                  lineHeight: 1,
+                  padding: 0,
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            {ITEMS.map((it) => {
+              const active = pathname === it.href;
+              return (
+                <Link
+                  key={it.href}
+                  href={it.href}
+                  style={{
+                    display: "block",
+                    padding: "12px 14px",
+                    background: active ? C.panel2 : "transparent",
+                    border: `1px solid ${active ? C.accent : C.line}`,
+                    borderRadius: 10,
+                    color: C.ink,
+                    textDecoration: "none",
+                    transition: "background .15s ease",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 15,
+                      fontWeight: 600,
+                      color: active ? C.accent : C.ink,
+                      marginBottom: 2,
+                    }}
+                  >
+                    {it.label}
+                  </div>
+                  <div style={{ fontSize: 11, color: C.muted }}>{it.sub}</div>
+                </Link>
+              );
+            })}
+
+            <div style={{ flex: 1 }} />
+            <div
+              style={{
+                fontFamily: "monospace",
+                fontSize: 10,
+                letterSpacing: ".08em",
+                color: C.muted,
+                textAlign: "center",
+                paddingTop: 12,
+                borderTop: `1px solid ${C.line}`,
+              }}
+            >
+              painel NFC-e · v0.1
+            </div>
+          </nav>
+        </div>
+      )}
+    </>
+  );
+}

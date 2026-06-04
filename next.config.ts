@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  serverExternalPackages: ["pdf-parse"],
+  allowedDevOrigins: ["192.168.15.2", "*.ngrok-free.dev", "*.ngrok-free.app", "*.ngrok.app"],
 };
 
 export default nextConfig;

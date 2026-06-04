@@ -1,66 +1,31 @@
-import Image from "next/image";
-import styles from "./page.module.css";
+import { listNotas } from "@/lib/db";
+import Dashboard, { type NotaPayload } from "./Dashboard";
+
+export const dynamic = "force-dynamic";
 
 export default function Home() {
-  return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className={styles.intro}>
-          <h1>To get started, edit the page.tsx file.</h1>
-          <p>
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
-  );
+  const rows = listNotas();
+  const notas: NotaPayload[] = rows.map((n) => ({
+    id: n.id,
+    numero: n.numero,
+    serie: n.serie,
+    data_emissao: n.data_emissao,
+    emitente: n.emitente,
+    cnpj: n.cnpj,
+    valor_total: n.valor_total,
+    chave_acesso: n.chave_acesso,
+    creditos: n.creditos,
+    situacao_credito: n.situacao_credito,
+    fonte: n.fonte,
+    itens: n.itens.map((i) => ({
+      id: i.id,
+      produto: i.produto,
+      codigo: i.codigo,
+      qt: i.qt,
+      un: i.un,
+      vu: i.vu,
+      vt: i.vt,
+    })),
+  }));
+  return <Dashboard notas={notas} />;
 }
