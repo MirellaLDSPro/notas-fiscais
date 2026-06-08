@@ -197,7 +197,7 @@ export default function LandingScreenshot({ src, alt, url }: Props) {
               <Image
                 src={src}
                 alt={alt}
-                width={1107}
+                width={2000}
                 height={1140}
                 sizes="(max-width: 1200px) 96vw, 1200px"
                 style={{ width: "100%", height: "auto", display: "block" }}
