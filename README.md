@@ -1,6 +1,6 @@
 # Painel NFC-e
 
-Dashboard pessoal de gastos a partir de **cupons fiscais (NFC-e)**, **planilhas xlsx** e **consulta da Nota Fiscal Paulista**. Tudo roda local em SQLite — nada sobe pra serviços externos exceto:
+Dashboard pessoal de gastos a partir de **cupons fiscais (NFC-e)**, **planilhas xlsx** e **consulta da Nota Fiscal Paulista**. Persistência em **Postgres** (Neon, serverless). Os únicos serviços externos chamados são:
 
 - Consultas a `brasilapi.com.br` para enriquecer endereço de estabelecimentos
 - Chamadas à API da Anthropic (`claude-haiku-4-5`) para gerar receitas a partir dos produtos comprados
@@ -8,7 +8,7 @@ Dashboard pessoal de gastos a partir de **cupons fiscais (NFC-e)**, **planilhas 
 ## Stack
 
 - **Next.js 16** (App Router, Turbopack) + TypeScript
-- **better-sqlite3** — banco local em `data/notas.db`
+- **@neondatabase/serverless** — Postgres (Neon) via HTTP, schema inicializado lazy
 - **pdf-parse** — extração de texto dos PDFs de NFC-e
 - **xlsx** — leitura de planilhas
 - **recharts** — gráficos
@@ -20,15 +20,12 @@ Dashboard pessoal de gastos a partir de **cupons fiscais (NFC-e)**, **planilhas 
 ```bash
 cd dashboard-app
 npm install
+cp .env.example .env.local      # preencha DATABASE_URL e ANTHROPIC_API_KEY
 ```
 
-Crie um `.env.local` (opcional, só para a página de receitas):
+`DATABASE_URL`: crie um projeto grátis no [Neon](https://neon.tech), copie a connection string "pooled" (sufixo `-pooler`) com `?sslmode=require`. O schema é criado no primeiro acesso ao banco.
 
-```bash
-ANTHROPIC_API_KEY=sk-ant-...
-```
-
-> `.env.local` e `data/` estão no `.gitignore` — chaves e o SQLite não vão pro repositório.
+`ANTHROPIC_API_KEY`: opcional, só pra `/receitas`.
 
 ## Como rodar
 
@@ -113,30 +110,27 @@ CNPJ é gravado **formatado nas notas** (`93.209.765/0697-45`) e **só dígitos 
 
 ## Comandos úteis
 
+### Migrar dados do SQLite antigo
+
+Se você tem um `data/notas.db` herdado da versão anterior, rode uma vez:
+
+```bash
+DATABASE_URL='postgres://...neon.tech/...?sslmode=require' \
+  npx tsx scripts/migrate-from-sqlite.ts
+```
+
+Idempotente: notas já existentes (por `chave_acesso` ou `(cnpj, numero)`) são puladas.
+
 ### Apagar todos os dados do banco
 
 > ⚠️ Operação destrutiva. Confirme antes de rodar.
 
-Crie um script ad-hoc dentro de `dashboard-app/` e rode com `node`:
+No console SQL do Neon (ou via `psql`):
 
-```js
-// wipe.cjs
-const Database = require("better-sqlite3");
-const db = new Database("data/notas.db");
-db.exec("DELETE FROM itens");
-db.exec("DELETE FROM notas");
-db.exec("DELETE FROM estabelecimentos");
-db.exec("DELETE FROM sqlite_sequence WHERE name IN ('notas','itens')");
-db.pragma("wal_checkpoint(TRUNCATE)");
-db.exec("VACUUM");
-db.close();
+```sql
+TRUNCATE itens, notas RESTART IDENTITY CASCADE;
+TRUNCATE estabelecimentos;
 ```
-
-```bash
-node wipe.cjs && rm wipe.cjs
-```
-
-Se o dev server estiver rodando, a próxima requisição vê o estado vazio (handle reaberto via WAL).
 
 ### Sincronizar endereços (BrasilAPI)
 
@@ -156,11 +150,7 @@ curl -X POST http://localhost:3000/api/upload \
 
 ### Inspecionar o banco
 
-```bash
-sqlite3 data/notas.db
-# ou via node:
-node -e 'const db = require("better-sqlite3")("data/notas.db"); console.log(db.prepare("SELECT COUNT(*) c FROM notas").get());'
-```
+Use o **SQL Editor** do Neon (web), ou `psql` apontando para `DATABASE_URL`.
 
 ## Estrutura do código
 
@@ -184,15 +174,16 @@ dashboard-app/
 │       ├── recipes/route.ts
 │       └── estabelecimentos/sync/route.ts
 ├── lib/
-│   ├── db.ts                   # SQLite, schema, upserts
+│   ├── db.ts                   # Neon Postgres, schema lazy, upserts
 │   ├── parseNfce.ts            # PDF NFC-e → ParsedNota (com endereço)
 │   ├── parseXlsx.ts            # planilha → ParsedNota[]
 │   ├── parseNfpCsv.ts          # CSV UTF-16 → ParsedNota[] (header-only)
 │   ├── brasilapi.ts            # cliente BrasilAPI com cache em memória
 │   └── recipes.ts              # gerador de receitas (Claude Haiku 4.5)
-├── data/                       # SQLite (gitignored)
+├── scripts/
+│   └── migrate-from-sqlite.ts  # importa data/notas.db antigo para o Neon
 ├── next.config.ts              # serverExternalPackages + allowedDevOrigins
-└── .env.local                  # ANTHROPIC_API_KEY (gitignored)
+└── .env.local                  # DATABASE_URL + ANTHROPIC_API_KEY (gitignored)
 ```
 
 ## Decisões de design relevantes

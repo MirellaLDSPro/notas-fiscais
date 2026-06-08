@@ -1,46 +1,58 @@
-import Database from "better-sqlite3";
-import { mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-
-const DB_PATH = join(process.cwd(), "data", "notas.db");
-mkdirSync(dirname(DB_PATH), { recursive: true });
+import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 
 declare global {
   // eslint-disable-next-line no-var
-  var __nfce_db: Database.Database | undefined;
+  var __nfce_sql: NeonQueryFunction<false, false> | undefined;
+  // eslint-disable-next-line no-var
+  var __nfce_schema_ready: Promise<void> | undefined;
 }
 
-function init(db: Database.Database) {
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  db.exec(`
+function sql(): NeonQueryFunction<false, false> {
+  if (!globalThis.__nfce_sql) {
+    const url = process.env.DATABASE_URL;
+    if (!url) {
+      throw new Error(
+        "DATABASE_URL não definida. Configure no .env.local (dev) ou nas env vars do Vercel."
+      );
+    }
+    globalThis.__nfce_sql = neon(url);
+  }
+  return globalThis.__nfce_sql;
+}
+
+async function initSchema(): Promise<void> {
+  await sql()`
     CREATE TABLE IF NOT EXISTS notas (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id BIGSERIAL PRIMARY KEY,
       numero TEXT NOT NULL,
       serie TEXT,
       data_emissao TEXT NOT NULL,
       emitente TEXT NOT NULL,
       cnpj TEXT,
-      valor_total REAL NOT NULL,
+      valor_total DOUBLE PRECISION NOT NULL,
       chave_acesso TEXT UNIQUE,
-      creditos REAL NOT NULL DEFAULT 0,
+      creditos DOUBLE PRECISION NOT NULL DEFAULT 0,
       situacao_credito TEXT,
       fonte TEXT NOT NULL DEFAULT 'PDF',
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      created_at TEXT NOT NULL DEFAULT to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS'),
       UNIQUE (cnpj, numero)
-    );
+    )
+  `;
+  await sql()`
     CREATE TABLE IF NOT EXISTS itens (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      nota_id INTEGER NOT NULL REFERENCES notas(id) ON DELETE CASCADE,
+      id BIGSERIAL PRIMARY KEY,
+      nota_id BIGINT NOT NULL REFERENCES notas(id) ON DELETE CASCADE,
       produto TEXT NOT NULL,
       codigo TEXT,
-      qt REAL NOT NULL,
+      qt DOUBLE PRECISION NOT NULL,
       un TEXT,
-      vu REAL NOT NULL,
-      vt REAL NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_itens_nota ON itens(nota_id);
-    CREATE INDEX IF NOT EXISTS idx_notas_data ON notas(data_emissao);
+      vu DOUBLE PRECISION NOT NULL,
+      vt DOUBLE PRECISION NOT NULL
+    )
+  `;
+  await sql()`CREATE INDEX IF NOT EXISTS idx_itens_nota ON itens(nota_id)`;
+  await sql()`CREATE INDEX IF NOT EXISTS idx_notas_data ON notas(data_emissao)`;
+  await sql()`
     CREATE TABLE IF NOT EXISTS estabelecimentos (
       cnpj TEXT PRIMARY KEY,
       razao_social TEXT,
@@ -52,12 +64,19 @@ function init(db: Database.Database) {
       municipio TEXT,
       uf TEXT,
       cep TEXT,
-      latitude REAL,
-      longitude REAL,
+      latitude DOUBLE PRECISION,
+      longitude DOUBLE PRECISION,
       fonte TEXT,
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-  `);
+      updated_at TEXT NOT NULL DEFAULT to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS')
+    )
+  `;
+}
+
+async function ready(): Promise<void> {
+  if (!globalThis.__nfce_schema_ready) {
+    globalThis.__nfce_schema_ready = initSchema();
+  }
+  return globalThis.__nfce_schema_ready;
 }
 
 export const cnpjDigits = (s: string | null | undefined): string =>
@@ -96,99 +115,68 @@ export type EstabelecimentoInput = {
   fonte: "PDF" | "BRASIL_API";
 };
 
-export function upsertEstabelecimento(input: EstabelecimentoInput): "inserted" | "updated" | "skipped" {
-  const db = getDb();
+export async function upsertEstabelecimento(
+  input: EstabelecimentoInput
+): Promise<"inserted" | "updated" | "skipped"> {
+  await ready();
   const cnpj = cnpjDigits(input.cnpj);
   if (cnpj.length < 8) return "skipped";
 
-  const existing = db
-    .prepare("SELECT fonte, logradouro FROM estabelecimentos WHERE cnpj = ?")
-    .get(cnpj) as { fonte: string | null; logradouro: string | null } | undefined;
+  const existingRows = (await sql()`
+    SELECT fonte, logradouro FROM estabelecimentos WHERE cnpj = ${cnpj}
+  `) as Array<{ fonte: string | null; logradouro: string | null }>;
+  const existing = existingRows[0];
 
   if (existing) {
     if (existing.fonte === "BRASIL_API" && input.fonte === "PDF") return "skipped";
     if (existing.logradouro && input.fonte === "PDF" && !input.logradouro) return "skipped";
-    db.prepare(
-      `UPDATE estabelecimentos SET
-         razao_social = COALESCE(?, razao_social),
-         nome_fantasia = COALESCE(?, nome_fantasia),
-         logradouro = COALESCE(?, logradouro),
-         numero = COALESCE(?, numero),
-         complemento = COALESCE(?, complemento),
-         bairro = COALESCE(?, bairro),
-         municipio = COALESCE(?, municipio),
-         uf = COALESCE(?, uf),
-         cep = COALESCE(?, cep),
-         latitude = COALESCE(?, latitude),
-         longitude = COALESCE(?, longitude),
-         fonte = ?,
-         updated_at = datetime('now')
-       WHERE cnpj = ?`
-    ).run(
-      input.razao_social ?? null,
-      input.nome_fantasia ?? null,
-      input.logradouro ?? null,
-      input.numero ?? null,
-      input.complemento ?? null,
-      input.bairro ?? null,
-      input.municipio ?? null,
-      input.uf ?? null,
-      input.cep ?? null,
-      input.latitude ?? null,
-      input.longitude ?? null,
-      input.fonte,
-      cnpj
-    );
+    await sql()`
+      UPDATE estabelecimentos SET
+        razao_social  = COALESCE(${input.razao_social ?? null}, razao_social),
+        nome_fantasia = COALESCE(${input.nome_fantasia ?? null}, nome_fantasia),
+        logradouro    = COALESCE(${input.logradouro ?? null}, logradouro),
+        numero        = COALESCE(${input.numero ?? null}, numero),
+        complemento   = COALESCE(${input.complemento ?? null}, complemento),
+        bairro        = COALESCE(${input.bairro ?? null}, bairro),
+        municipio     = COALESCE(${input.municipio ?? null}, municipio),
+        uf            = COALESCE(${input.uf ?? null}, uf),
+        cep           = COALESCE(${input.cep ?? null}, cep),
+        latitude      = COALESCE(${input.latitude ?? null}, latitude),
+        longitude     = COALESCE(${input.longitude ?? null}, longitude),
+        fonte         = ${input.fonte},
+        updated_at    = to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS')
+      WHERE cnpj = ${cnpj}
+    `;
     return "updated";
   }
 
-  db.prepare(
-    `INSERT INTO estabelecimentos
+  await sql()`
+    INSERT INTO estabelecimentos
       (cnpj, razao_social, nome_fantasia, logradouro, numero, complemento,
        bairro, municipio, uf, cep, latitude, longitude, fonte)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    cnpj,
-    input.razao_social ?? null,
-    input.nome_fantasia ?? null,
-    input.logradouro ?? null,
-    input.numero ?? null,
-    input.complemento ?? null,
-    input.bairro ?? null,
-    input.municipio ?? null,
-    input.uf ?? null,
-    input.cep ?? null,
-    input.latitude ?? null,
-    input.longitude ?? null,
-    input.fonte
-  );
+    VALUES
+      (${cnpj}, ${input.razao_social ?? null}, ${input.nome_fantasia ?? null},
+       ${input.logradouro ?? null}, ${input.numero ?? null}, ${input.complemento ?? null},
+       ${input.bairro ?? null}, ${input.municipio ?? null}, ${input.uf ?? null},
+       ${input.cep ?? null}, ${input.latitude ?? null}, ${input.longitude ?? null},
+       ${input.fonte})
+  `;
   return "inserted";
 }
 
-export function listCnpjsWithoutEstabelecimento(): string[] {
-  const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT DISTINCT n.cnpj
-         FROM notas n
-         WHERE n.cnpj IS NOT NULL AND n.cnpj != ''
-           AND NOT EXISTS (
-             SELECT 1 FROM estabelecimentos e
-             WHERE e.cnpj = REPLACE(REPLACE(REPLACE(n.cnpj, '.', ''), '/', ''), '-', '')
-               AND e.logradouro IS NOT NULL
-           )`
-    )
-    .all() as Array<{ cnpj: string }>;
+export async function listCnpjsWithoutEstabelecimento(): Promise<string[]> {
+  await ready();
+  const rows = (await sql()`
+    SELECT DISTINCT n.cnpj
+      FROM notas n
+      WHERE n.cnpj IS NOT NULL AND n.cnpj <> ''
+        AND NOT EXISTS (
+          SELECT 1 FROM estabelecimentos e
+          WHERE e.cnpj = REPLACE(REPLACE(REPLACE(n.cnpj, '.', ''), '/', ''), '-', '')
+            AND e.logradouro IS NOT NULL
+        )
+  `) as Array<{ cnpj: string }>;
   return rows.map((r) => r.cnpj).filter(Boolean);
-}
-
-export function getDb(): Database.Database {
-  if (!globalThis.__nfce_db) {
-    const db = new Database(DB_PATH);
-    init(db);
-    globalThis.__nfce_db = db;
-  }
-  return globalThis.__nfce_db;
 }
 
 export type Fonte = "PDF" | "XLSX" | "NFP";
@@ -257,74 +245,99 @@ export type UpsertResult = {
   action: "inserted" | "merged" | "skipped";
 };
 
-export function upsertNota(parsed: ParsedNota): UpsertResult {
-  const db = getDb();
-  const findStmt = db.prepare(
-    `SELECT * FROM notas WHERE
-      (? IS NOT NULL AND chave_acesso = ?)
-      OR (cnpj = ? AND numero = ?)
-     LIMIT 1`
-  );
-  const existing = findStmt.get(
-    parsed.chave_acesso,
-    parsed.chave_acesso,
-    parsed.cnpj,
-    parsed.numero
-  ) as NotaRow | undefined;
-
-  if (existing) {
-    return { id: existing.id, action: "skipped" };
+export async function upsertNota(parsed: ParsedNota): Promise<UpsertResult> {
+  await ready();
+  const existingRows = (await sql()`
+    SELECT id FROM notas
+     WHERE (${parsed.chave_acesso}::text IS NOT NULL AND chave_acesso = ${parsed.chave_acesso})
+        OR (${parsed.cnpj}::text IS NOT NULL AND cnpj = ${parsed.cnpj} AND numero = ${parsed.numero})
+     LIMIT 1
+  `) as Array<{ id: number }>;
+  if (existingRows[0]) {
+    return { id: Number(existingRows[0].id), action: "skipped" };
   }
 
-  const tx = db.transaction((): UpsertResult => {
+  const produtos = parsed.itens.map((i) => i.produto);
+  const codigos = parsed.itens.map((i) => i.codigo);
+  const qts = parsed.itens.map((i) => i.qt);
+  const uns = parsed.itens.map((i) => i.un);
+  const vus = parsed.itens.map((i) => i.vu);
+  const vts = parsed.itens.map((i) => i.vt);
 
-    const res = db
-      .prepare(
-        `INSERT INTO notas
-          (numero, serie, data_emissao, emitente, cnpj, valor_total,
-           chave_acesso, creditos, situacao_credito, fonte)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        parsed.numero,
-        parsed.serie,
-        parsed.data_emissao,
-        parsed.emitente,
-        parsed.cnpj,
-        parsed.valor_total,
-        parsed.chave_acesso,
-        parsed.creditos ?? 0,
-        parsed.situacao_credito ?? null,
-        parsed.fonte
-      );
-    const id = res.lastInsertRowid as number;
-    if (parsed.itens.length > 0) {
-      const insI = db.prepare(
-        "INSERT INTO itens (nota_id, produto, codigo, qt, un, vu, vt) VALUES (?, ?, ?, ?, ?, ?, ?)"
-      );
-      for (const i of parsed.itens) {
-        insI.run(id, i.produto, i.codigo, i.qt, i.un, i.vu, i.vt);
-      }
-    }
-    return { id, action: "inserted" };
-  });
+  const result = (await sql()`
+    WITH new_nota AS (
+      INSERT INTO notas
+        (numero, serie, data_emissao, emitente, cnpj, valor_total,
+         chave_acesso, creditos, situacao_credito, fonte)
+      VALUES
+        (${parsed.numero}, ${parsed.serie}, ${parsed.data_emissao}, ${parsed.emitente},
+         ${parsed.cnpj}, ${parsed.valor_total}, ${parsed.chave_acesso},
+         ${parsed.creditos ?? 0}, ${parsed.situacao_credito ?? null}, ${parsed.fonte})
+      RETURNING id
+    ),
+    new_itens AS (
+      INSERT INTO itens (nota_id, produto, codigo, qt, un, vu, vt)
+      SELECT (SELECT id FROM new_nota), produto, codigo, qt, un, vu, vt
+        FROM unnest(
+          ${produtos}::text[],
+          ${codigos}::text[],
+          ${qts}::double precision[],
+          ${uns}::text[],
+          ${vus}::double precision[],
+          ${vts}::double precision[]
+        ) AS u(produto, codigo, qt, un, vu, vt)
+      RETURNING 1
+    )
+    SELECT id FROM new_nota
+  `) as Array<{ id: number }>;
 
-  return tx();
+  return { id: Number(result[0].id), action: "inserted" };
 }
 
 export type NotaWithItens = NotaRow & { itens: ItemRow[] };
 
-export function listNotas(): NotaWithItens[] {
-  const db = getDb();
-  const notas = db
-    .prepare("SELECT * FROM notas ORDER BY data_emissao DESC, id DESC")
-    .all() as NotaRow[];
-  const itens = db.prepare("SELECT * FROM itens").all() as ItemRow[];
+export async function listNotas(): Promise<NotaWithItens[]> {
+  await ready();
+  const notas = (await sql()`
+    SELECT * FROM notas ORDER BY data_emissao DESC, id DESC
+  `) as NotaRow[];
+  const itens = (await sql()`SELECT * FROM itens`) as ItemRow[];
   const byNota = new Map<number, ItemRow[]>();
   for (const it of itens) {
-    const list = byNota.get(it.nota_id) ?? [];
-    list.push(it);
-    byNota.set(it.nota_id, list);
+    const nid = Number(it.nota_id);
+    const list = byNota.get(nid) ?? [];
+    list.push({ ...it, id: Number(it.id), nota_id: nid });
+    byNota.set(nid, list);
   }
-  return notas.map((n) => ({ ...n, itens: byNota.get(n.id) ?? [] }));
+  return notas.map((n) => ({
+    ...n,
+    id: Number(n.id),
+    itens: byNota.get(Number(n.id)) ?? [],
+  }));
+}
+
+export async function pickLastThreeNotasWithItems(): Promise<{
+  notas: Array<{ numero: string; emitente: string; data: string }>;
+  produtos: string[];
+}> {
+  await ready();
+  const notas = (await sql()`
+    SELECT n.id, n.numero, n.emitente, n.data_emissao
+      FROM notas n
+      WHERE EXISTS (SELECT 1 FROM itens i WHERE i.nota_id = n.id)
+      ORDER BY n.created_at DESC, n.id DESC
+      LIMIT 3
+  `) as Array<{ id: number; numero: string; emitente: string; data_emissao: string }>;
+  if (notas.length === 0) return { notas: [], produtos: [] };
+
+  const ids = notas.map((n) => Number(n.id));
+  const produtos = (await sql()`
+    SELECT DISTINCT produto FROM itens
+     WHERE nota_id = ANY(${ids}::bigint[])
+     ORDER BY produto
+  `) as Array<{ produto: string }>;
+  return {
+    notas: notas.map((n) => ({ numero: n.numero, emitente: n.emitente, data: n.data_emissao })),
+    produtos: produtos.map((p) => p.produto),
+  };
 }

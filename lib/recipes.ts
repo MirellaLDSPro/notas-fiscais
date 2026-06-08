@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createHash } from "node:crypto";
-import { getDb } from "./db";
+import { pickLastThreeNotasWithItems } from "./db";
 
 export type Receita = {
   nome: string;
@@ -87,35 +87,11 @@ export type RecipesResult =
   | { ok: true; payload: ReceitasPayload; cached: boolean }
   | { ok: false; error: RecipesError };
 
-function pickLastThreeWithItems() {
-  const db = getDb();
-  const notas = db
-    .prepare(
-      `SELECT n.id, n.numero, n.emitente, n.data_emissao
-       FROM notas n
-       WHERE EXISTS (SELECT 1 FROM itens i WHERE i.nota_id = n.id)
-       ORDER BY n.created_at DESC, n.id DESC
-       LIMIT 3`
-    )
-    .all() as Array<{ id: number; numero: string; emitente: string; data_emissao: string }>;
-  if (notas.length === 0) return { notas: [], produtos: [] };
-
-  const ids = notas.map((n) => n.id);
-  const placeholders = ids.map(() => "?").join(",");
-  const produtos = db
-    .prepare(`SELECT DISTINCT produto FROM itens WHERE nota_id IN (${placeholders}) ORDER BY produto`)
-    .all(...ids) as Array<{ produto: string }>;
-  return {
-    notas: notas.map((n) => ({ numero: n.numero, emitente: n.emitente, data: n.data_emissao })),
-    produtos: produtos.map((p) => p.produto),
-  };
-}
-
 export async function gerarReceitas(opts: { force?: boolean } = {}): Promise<RecipesResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return { ok: false, error: { kind: "no_key" } };
 
-  const { notas, produtos } = pickLastThreeWithItems();
+  const { notas, produtos } = await pickLastThreeNotasWithItems();
   if (produtos.length === 0) {
     return { ok: false, error: { kind: "no_items", notas_with_items: notas.length } };
   }

@@ -47,9 +47,9 @@ export async function POST(request: Request) {
       const parsed = await parseFile(name, buf);
       const notas: FileSummary[] = [];
       for (const p of parsed) {
-        const res = upsertNota(p);
+        const res = await upsertNota(p);
         if (p.fonte === "PDF" && p.cnpj && p.endereco) {
-          upsertEstabelecimento({
+          await upsertEstabelecimento({
             cnpj: p.cnpj,
             razao_social: p.emitente,
             logradouro: p.endereco.logradouro,

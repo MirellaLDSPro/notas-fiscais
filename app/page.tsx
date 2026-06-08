@@ -3,8 +3,8 @@ import Dashboard, { type NotaPayload } from "./Dashboard";
 
 export const dynamic = "force-dynamic";
 
-export default function Home() {
-  const rows = listNotas();
+export default async function Home() {
+  const rows = await listNotas();
   const notas: NotaPayload[] = rows.map((n) => ({
     id: n.id,
     numero: n.numero,

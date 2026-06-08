@@ -21,7 +21,7 @@ async function runSync(): Promise<{
   failed: number;
   results: ResultRow[];
 }> {
-  const cnpjs = listCnpjsWithoutEstabelecimento();
+  const cnpjs = await listCnpjsWithoutEstabelecimento();
   const results: ResultRow[] = [];
   for (let i = 0; i < cnpjs.length; i++) {
     const raw = cnpjs[i];
@@ -32,7 +32,7 @@ async function runSync(): Promise<{
     }
     const r = await lookupCnpj(digits);
     if (r.ok) {
-      upsertEstabelecimento({
+      await upsertEstabelecimento({
         cnpj: digits,
         razao_social: r.data.razao_social,
         nome_fantasia: r.data.nome_fantasia,
