@@ -5,7 +5,6 @@ const { auth } = NextAuth(authConfig);
 
 export default auth((req) => {
   if (req.nextUrl.pathname === "/") return;
-  if (req.nextUrl.pathname === "/api/debug-env") return;
   if (!req.auth) {
     const url = new URL("/login", req.url);
     url.searchParams.set("from", req.nextUrl.pathname);
