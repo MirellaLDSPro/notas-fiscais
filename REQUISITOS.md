@@ -32,6 +32,10 @@ receitas com IA a partir dos produtos comprados.
 | RF12 | Qualquer conta Google deve poder logar e ter um **workspace isolado**: as notas (`notas`/`itens`) são escopadas por `user_id` e cada usuário só vê os próprios dados. |
 | RF13 | No primeiro login de uma conta nova, o sistema deve criar registro em `users` automaticamente (upsert por email no callback `signIn` do NextAuth). |
 | RF14 | O usuário autenticado deve ver seu email no menu lateral e dispor de botão **Sair**, que redireciona para a landing pública `/`. |
+| RF15 | Em `/compartilhar`, o usuário deve poder conceder acesso de **leitura** ao seu relatório a outro email — incluindo emails de contas que ainda não logaram. A grant é per-email, idempotente (`UNIQUE (owner_user_id, shared_with_email)`) e removível. |
+| RF16 | O recebedor de uma grant deve ver os relatórios disponíveis num combobox com busca no fim do menu. Selecionar abre `/dashboard`, `/precos` ou `/lista-compras` com `?owner=<id>`. |
+| RF17 | Em modo de visualização compartilhada (`?owner=<id>`), o servidor deve verificar a grant via `canViewAsOwner(viewerEmail, ownerId)` antes de servir os dados do dono; falha redireciona para a rota base. Mutations (upload) ficam bloqueadas no client (escondidas) e devem ser bloqueadas no server caso a rota receba dados de escrita. |
+| RF18 | A página `/receitas` não participa do compartilhamento — fica oculta do menu em modo viewing. |
 
 ## 3. Requisitos não funcionais
 
@@ -95,6 +99,8 @@ itens (id, nota_id FK → notas, produto, codigo, qt, un, vu, vt)
 estabelecimentos (cnpj PK, razao_social, nome_fantasia, endereço completo,
                   latitude, longitude, fonte, updated_at)
 produto_categorias (produto PK, categoria, fonte, criado_em)
+report_shares (id, owner_user_id FK → users, shared_with_email, created_at,
+               UNIQUE (owner_user_id, shared_with_email))
 ```
 
 - `notas` e `itens` são **per-user** (escopo via `user_id` em `notas`; `itens`
@@ -108,6 +114,10 @@ produto_categorias (produto PK, categoria, fonte, criado_em)
   `estabelecimentos.cnpj` é **só dígitos**. Helper `cnpjDigits()` em `lib/db.ts`.
 - `produto_categorias` é cache do classificador AI; o dicionário hardcoded em
   `lib/categorizar.ts` não usa a tabela.
+- `report_shares` é chaveado por **email** (não `user_id`) pra permitir
+  compartilhar com alguém que ainda não logou. A resolução pra `user_id` é
+  feita no momento da query (`canViewAsOwner` faz `WHERE shared_with_email =
+  lower(viewerEmail)`).
 
 ## 6. Restrições / fora de escopo
 
@@ -119,6 +129,14 @@ produto_categorias (produto PK, categoria, fonte, criado_em)
   defesa razoável.
 - **Sem painel administrativo.** Não há interface pra listar/gerenciar
   usuários — uso direto do Neon SQL Editor.
+- **Compartilhamento é binário e por workspace inteiro.** Quem recebe acesso
+  vê Dashboard + Lista de compras + Preços do owner. Permissionamento
+  granular (esconder categorias específicas, esconder valores absolutos, dar
+  acesso só a uma das páginas) está fora do escopo atual — fica como
+  próximo passo se virar necessidade.
+- **Compartilhamento não inclui Receitas.** A página consome API paga e
+  cacheia por owner — compartilhar implicaria cobrança cruzada e
+  reprocessamentos desnecessários.
 - **Sem edição manual de notas via UI.** Correções precisam ser feitas no DB
   (Neon SQL Editor) ou re-upload do PDF original.
 - **Sem internacionalização.** PT-BR e BRL hardcoded.
@@ -142,3 +160,9 @@ produto_categorias (produto PK, categoria, fonte, criado_em)
 - **Workspace** — escopo de dados de um usuário. Cada conta Google gera um
   workspace isolado: notas e itens são filtrados por `user_id` em todas as
   queries.
+- **Share / Grant** — registro em `report_shares` que dá a um email externo
+  acesso de leitura ao workspace do owner. Não dá acesso de escrita.
+- **Modo viewing (viewing-as)** — estado em que o viewer consulta dados de
+  outro user via `?owner=<id>` na URL. Server valida a grant antes de
+  responder. Mutations ficam bloqueadas; UI esconde botões de escrita e
+  exibe banner identificando o dono.

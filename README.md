@@ -80,8 +80,23 @@ Notas são identificadas por **`chave_acesso` (se disponível)** ou pelo par **`
 | `/dashboard` | auth | Dashboard principal: KPIs, gráfico "Gasto por compra/mês" (clicável → abre modal com as notas), top produtos, evolução de preço, créditos NFP, upload e scanner de QR. |
 | `/precos` | auth | Comparador de preço por produto recorrente — preço médio por mês e por dia da semana, melhor mês destacado. |
 | `/lista-compras` | auth | Categorias recorrentes (presentes em 2+ notas) como checklist interativo. Estado marcado fica salvo no aparelho. |
-| `/receitas` | auth | Receitas geradas por Claude Haiku 4.5 a partir dos produtos das **últimas 3 notas com itens** do usuário. Cache por hash do `userId + produtos`. |
+| `/receitas` | auth | Receitas geradas por Claude Haiku 4.5 a partir dos produtos das **últimas 3 notas com itens** do usuário. Cache por hash do `userId + produtos`. Não disponível em modo de visualização compartilhada. |
+| `/compartilhar` | auth | Gerencia quem tem acesso de leitura ao seu relatório (adicionar/remover por email). |
 | `/contato` | auth | Página estática com canais de contato. |
+
+### Compartilhamento de relatórios
+
+Owners adicionam emails em `/compartilhar`. Quem recebe vê um combobox com busca no fim do menu sandwich listando relatórios disponíveis. Ao selecionar, navega pra `/dashboard?owner=<id>`, `/precos?owner=<id>` ou `/lista-compras?owner=<id>` — pages aceitam o param, validam permissão via `canViewAsOwner(email, ownerId)` e leem os dados do dono em vez do viewer.
+
+Em modo viewing:
+
+- Banner verde no topo identifica o dono e oferece "Sair desta visão".
+- `UploadDropzone` e demais ações de escrita ficam ocultas.
+- Menu adiciona "← Voltar ao meu relatório" no topo.
+- Itens owner-aware do menu (Dashboard, Lista de compras, Preços) propagam o `?owner=` — viewer navega entre as 3 sem perder a visão.
+- Receitas some do menu (consome API paga e não faz sentido compartilhar cache por owner).
+
+Compartilhar com email que ainda não logou é aceito — quando essa pessoa entrar pela primeira vez, o registro em `report_shares` (chaveado por `shared_with_email`) já está lá e aparece no menu dela. Permissionamento granular (por página) está fora do escopo atual: acesso é tudo-ou-nada nas 3 pages.
 
 ## API
 
@@ -122,6 +137,11 @@ estabelecimentos (                -- tabela global, não por usuário
 
 produto_categorias (              -- tabela global, cache do classificador IA
   produto (PK), categoria, fonte, criado_em
+)
+
+report_shares (
+  id, owner_user_id (FK → users), shared_with_email, created_at,
+  UNIQUE (owner_user_id, shared_with_email)
 )
 ```
 
@@ -198,10 +218,12 @@ dashboard-app/
 │   ├── Menu.tsx                # menu sandwich flutuante
 │   ├── SearchableSelect.tsx    # combobox usado em /precos
 │   ├── login/page.tsx          # server action: signIn("google")
-│   ├── dashboard/page.tsx      # server: auth + getDashboardData(userId)
-│   ├── precos/                 # comparador de preço por período
-│   ├── lista-compras/          # checklist por categoria
-│   ├── receitas/               # geração de receitas
+│   ├── dashboard/page.tsx      # server: resolveDataOwner → getDashboardData
+│   ├── precos/                 # comparador de preço por período (aceita ?owner=)
+│   ├── lista-compras/          # checklist por categoria (aceita ?owner=)
+│   ├── receitas/               # geração de receitas (sempre own data)
+│   ├── compartilhar/page.tsx   # gestão de quem tem acesso ao seu relatório
+│   ├── ViewingAsBanner.tsx     # banner "Visualizando relatório de NOME · sair"
 │   ├── contato/page.tsx
 │   └── api/
 │       ├── auth/[...nextauth]  # handlers do NextAuth
