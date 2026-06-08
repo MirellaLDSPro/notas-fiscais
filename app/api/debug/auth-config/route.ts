@@ -17,5 +17,6 @@ export async function GET(request: Request) {
     VERCEL_URL: process.env.VERCEL_URL ?? null,
     VERCEL_BRANCH_URL: process.env.VERCEL_BRANCH_URL ?? null,
     VERCEL_PROJECT_PRODUCTION_URL: process.env.VERCEL_PROJECT_PRODUCTION_URL ?? null,
+    last_signin: (globalThis as { __last_signin?: unknown }).__last_signin ?? null,
   });
 }
