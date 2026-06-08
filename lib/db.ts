@@ -70,6 +70,14 @@ async function initSchema(): Promise<void> {
       updated_at TEXT NOT NULL DEFAULT to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS')
     )
   `;
+  await sql()`
+    CREATE TABLE IF NOT EXISTS produto_categorias (
+      produto TEXT PRIMARY KEY,
+      categoria TEXT NOT NULL,
+      fonte TEXT NOT NULL,
+      criado_em TEXT NOT NULL DEFAULT to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS')
+    )
+  `;
 }
 
 async function ready(): Promise<void> {
@@ -343,58 +351,116 @@ export async function pickLastThreeNotasWithItems(): Promise<{
 }
 
 export type ListaCompraItem = {
-  produto: string;
+  categoria: string;
   vezes: number;
   ultima_compra: string;
-  total_qt: number;
   preco_medio: number;
-  un: string | null;
+  produtos: string[];
 };
 
 export async function getListaCompras(): Promise<ListaCompraItem[]> {
   await ready();
-  const rows = (await sql()`
-    WITH base AS (
-      SELECT
-        UPPER(TRIM(i.produto)) AS produto,
-        i.nota_id,
-        i.qt,
-        i.vu,
-        i.un,
-        n.data_emissao
-      FROM itens i
-      JOIN notas n ON n.id = i.nota_id
-      WHERE TRIM(i.produto) <> ''
-    )
+  const { categorizarPorDicionario, categorizarLote } = await import("./categorizar");
+
+  const itensRows = (await sql()`
     SELECT
-      produto,
-      COUNT(DISTINCT nota_id)::int AS vezes,
-      MAX(data_emissao) AS ultima_compra,
-      SUM(qt)::float AS total_qt,
-      AVG(vu)::float AS preco_medio,
-      (
-        SELECT un FROM base b2
-         WHERE b2.produto = base.produto AND un IS NOT NULL
-         GROUP BY un ORDER BY COUNT(*) DESC, un LIMIT 1
-      ) AS un
-    FROM base
-    GROUP BY produto
-    HAVING COUNT(DISTINCT nota_id) >= 3
-    ORDER BY vezes DESC, ultima_compra DESC, produto ASC
-  `) as Array<{
-    produto: string;
-    vezes: number;
+      UPPER(TRIM(i.produto)) AS produto,
+      i.nota_id,
+      i.vu,
+      n.data_emissao
+    FROM itens i
+    JOIN notas n ON n.id = i.nota_id
+    WHERE TRIM(i.produto) <> ''
+  `) as Array<{ produto: string; nota_id: number; vu: number; data_emissao: string }>;
+
+  if (itensRows.length === 0) return [];
+
+  const produtosUnicos = Array.from(new Set(itensRows.map((r) => r.produto)));
+
+  const categoriaPorProduto = new Map<string, string>();
+  const aClassificar: string[] = [];
+  for (const p of produtosUnicos) {
+    const dict = categorizarPorDicionario(p);
+    if (dict) categoriaPorProduto.set(p, dict);
+    else aClassificar.push(p);
+  }
+
+  if (aClassificar.length > 0) {
+    const cached = (await sql()`
+      SELECT produto, categoria FROM produto_categorias
+       WHERE produto = ANY(${aClassificar}::text[])
+    `) as Array<{ produto: string; categoria: string }>;
+    for (const c of cached) categoriaPorProduto.set(c.produto, c.categoria);
+
+    const aindaSem = aClassificar.filter((p) => !categoriaPorProduto.has(p));
+    if (aindaSem.length > 0) {
+      const aiResult = await categorizarLote(aindaSem);
+      const fonteAi = process.env.ANTHROPIC_API_KEY ? "ai" : "fallback";
+      for (const [produto, categoria] of aiResult) {
+        categoriaPorProduto.set(produto, categoria);
+        await sql()`
+          INSERT INTO produto_categorias (produto, categoria, fonte)
+          VALUES (${produto}, ${categoria}, ${fonteAi})
+          ON CONFLICT (produto) DO NOTHING
+        `;
+      }
+    }
+  }
+
+  type Bucket = {
+    categoria: string;
+    notas: Set<number>;
     ultima_compra: string;
-    total_qt: number;
-    preco_medio: number;
-    un: string | null;
-  }>;
-  return rows.map((r) => ({
-    produto: r.produto,
-    vezes: Number(r.vezes),
-    ultima_compra: r.ultima_compra,
-    total_qt: Number(r.total_qt),
-    preco_medio: Number(r.preco_medio),
-    un: r.un,
-  }));
+    vus: number[];
+    produtos: Set<string>;
+  };
+  const buckets = new Map<string, Bucket>();
+  for (const r of itensRows) {
+    const cat = categoriaPorProduto.get(r.produto) ?? r.produto;
+    let b = buckets.get(cat);
+    if (!b) {
+      b = { categoria: cat, notas: new Set(), ultima_compra: r.data_emissao, vus: [], produtos: new Set() };
+      buckets.set(cat, b);
+    }
+    b.notas.add(Number(r.nota_id));
+    b.vus.push(Number(r.vu));
+    b.produtos.add(r.produto);
+    if (compareDataEmissaoDesc(r.data_emissao, b.ultima_compra) > 0) {
+      b.ultima_compra = r.data_emissao;
+    }
+  }
+
+  const items: ListaCompraItem[] = [];
+  for (const b of buckets.values()) {
+    if (b.notas.size < 2) continue;
+    const preco_medio = b.vus.reduce((s, v) => s + v, 0) / b.vus.length;
+    items.push({
+      categoria: b.categoria,
+      vezes: b.notas.size,
+      ultima_compra: b.ultima_compra,
+      preco_medio,
+      produtos: Array.from(b.produtos).sort(),
+    });
+  }
+  items.sort(
+    (a, b) =>
+      b.vezes - a.vezes ||
+      compareDataEmissaoDesc(b.ultima_compra, a.ultima_compra) ||
+      a.categoria.localeCompare(b.categoria, "pt-BR")
+  );
+  return items;
+}
+
+function compareDataEmissaoDesc(a: string, b: string): number {
+  const ka = dataKey(a);
+  const kb = dataKey(b);
+  return ka.localeCompare(kb);
+}
+
+function dataKey(d: string): string {
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(d)) {
+    const [dd, mm, yyyy] = d.split("/");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  return d;
 }
