@@ -355,6 +355,7 @@ export type ListaCompraItem = {
   vezes: number;
   ultima_compra: string;
   preco_medio: number;
+  vu_ultimo: number;
   produtos: string[];
 };
 
@@ -411,6 +412,7 @@ export async function getListaCompras(): Promise<ListaCompraItem[]> {
     categoria: string;
     notas: Set<number>;
     ultima_compra: string;
+    vu_ultimo: number;
     vus: number[];
     produtos: Set<string>;
   };
@@ -419,7 +421,14 @@ export async function getListaCompras(): Promise<ListaCompraItem[]> {
     const cat = categoriaPorProduto.get(r.produto) ?? r.produto;
     let b = buckets.get(cat);
     if (!b) {
-      b = { categoria: cat, notas: new Set(), ultima_compra: r.data_emissao, vus: [], produtos: new Set() };
+      b = {
+        categoria: cat,
+        notas: new Set(),
+        ultima_compra: r.data_emissao,
+        vu_ultimo: Number(r.vu),
+        vus: [],
+        produtos: new Set(),
+      };
       buckets.set(cat, b);
     }
     b.notas.add(Number(r.nota_id));
@@ -427,6 +436,7 @@ export async function getListaCompras(): Promise<ListaCompraItem[]> {
     b.produtos.add(r.produto);
     if (compareDataEmissaoDesc(r.data_emissao, b.ultima_compra) > 0) {
       b.ultima_compra = r.data_emissao;
+      b.vu_ultimo = Number(r.vu);
     }
   }
 
@@ -439,6 +449,7 @@ export async function getListaCompras(): Promise<ListaCompraItem[]> {
       vezes: b.notas.size,
       ultima_compra: b.ultima_compra,
       preco_medio,
+      vu_ultimo: b.vu_ultimo,
       produtos: Array.from(b.produtos).sort(),
     });
   }
@@ -449,6 +460,308 @@ export async function getListaCompras(): Promise<ListaCompraItem[]> {
       a.categoria.localeCompare(b.categoria, "pt-BR")
   );
   return items;
+}
+
+export type SeriePrecoProduto = {
+  key: string;
+  produto: string;
+  codigo: string | null;
+  un_principal: string | null;
+  is_peso: boolean;
+  n_total: number;
+  vu_min: number;
+  vu_max: number;
+  vu_avg: number;
+  vu_ultimo: number;
+  data_ultimo: string;
+  mensal: Array<{ ym: string; label: string; vu_avg: number; n: number }>;
+  dow: Array<{ dia: number; label: string; vu_avg: number; n: number }>;
+  melhor_mes: { ym: string; label: string; vu_avg: number; n: number } | null;
+};
+
+const MES_LABEL = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+const DOW_LABEL = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+
+function parseDataEmissao(d: string): Date | null {
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(d)) {
+    const [dd, mm, yyyy] = d.split("/").map((x) => +x);
+    return new Date(yyyy, mm - 1, dd);
+  }
+  return null;
+}
+
+export async function getSeriesPrecos(): Promise<SeriePrecoProduto[]> {
+  await ready();
+  const rows = (await sql()`
+    SELECT i.produto, i.codigo, i.un, i.vu, n.data_emissao
+      FROM itens i
+      JOIN notas n ON n.id = i.nota_id
+     WHERE i.vu > 0 AND TRIM(i.produto) <> ''
+  `) as Array<{ produto: string; codigo: string | null; un: string | null; vu: number; data_emissao: string }>;
+  if (rows.length === 0) return [];
+
+  type Bucket = {
+    key: string;
+    codigo: string | null;
+    nameCounts: Map<string, number>;
+    unCounts: Map<string, number>;
+    obs: Array<{ vu: number; data: Date; raw: string }>;
+  };
+  const buckets = new Map<string, Bucket>();
+  for (const r of rows) {
+    const d = parseDataEmissao(r.data_emissao);
+    if (!d) continue;
+    const codigo = r.codigo && r.codigo.trim() ? r.codigo.trim() : null;
+    const key = codigo ? `c:${codigo}` : `p:${r.produto}`;
+    let b = buckets.get(key);
+    if (!b) {
+      b = { key, codigo, nameCounts: new Map(), unCounts: new Map(), obs: [] };
+      buckets.set(key, b);
+    }
+    b.nameCounts.set(r.produto, (b.nameCounts.get(r.produto) ?? 0) + 1);
+    if (r.un) b.unCounts.set(r.un, (b.unCounts.get(r.un) ?? 0) + 1);
+    b.obs.push({ vu: Number(r.vu), data: d, raw: r.data_emissao });
+  }
+
+  const out: SeriePrecoProduto[] = [];
+  for (const b of buckets.values()) {
+    if (b.obs.length === 0) continue;
+    const vus = b.obs.map((o) => o.vu);
+    const vu_min = Math.min(...vus);
+    const vu_max = Math.max(...vus);
+    const vu_avg = vus.reduce((s, x) => s + x, 0) / vus.length;
+    const sortedDesc = [...b.obs].sort((a, b2) => b2.data.getTime() - a.data.getTime());
+    const ultimo = sortedDesc[0];
+    const produto = [...b.nameCounts.entries()].sort((a, b2) => b2[1] - a[1])[0][0];
+    const un_principal = [...b.unCounts.entries()].sort((a, b2) => b2[1] - a[1])[0]?.[0] ?? null;
+    const is_peso = un_principal === "KG" || un_principal === "kg";
+
+    const mensalMap = new Map<string, number[]>();
+    const dowMap = new Map<number, number[]>();
+    for (const o of b.obs) {
+      const ym = `${o.data.getFullYear()}-${String(o.data.getMonth() + 1).padStart(2, "0")}`;
+      const yArr = mensalMap.get(ym) ?? [];
+      yArr.push(o.vu);
+      mensalMap.set(ym, yArr);
+
+      const dow = o.data.getDay();
+      const dArr = dowMap.get(dow) ?? [];
+      dArr.push(o.vu);
+      dowMap.set(dow, dArr);
+    }
+
+    const mensal = [...mensalMap.entries()]
+      .map(([ym, arr]) => {
+        const [y, m] = ym.split("-");
+        return {
+          ym,
+          label: `${MES_LABEL[+m - 1]}/${y.slice(2)}`,
+          vu_avg: arr.reduce((s, x) => s + x, 0) / arr.length,
+          n: arr.length,
+        };
+      })
+      .sort((a, b2) => a.ym.localeCompare(b2.ym));
+
+    const dow = [...dowMap.entries()]
+      .map(([dia, arr]) => ({
+        dia,
+        label: DOW_LABEL[dia],
+        vu_avg: arr.reduce((s, x) => s + x, 0) / arr.length,
+        n: arr.length,
+      }))
+      .sort((a, b2) => a.dia - b2.dia);
+
+    const melhor_mes =
+      mensal.length >= 2
+        ? mensal.reduce((best, m) => (m.vu_avg < best.vu_avg ? m : best))
+        : null;
+
+    out.push({
+      key: b.key,
+      produto,
+      codigo: b.codigo,
+      un_principal,
+      is_peso,
+      n_total: b.obs.length,
+      vu_min,
+      vu_max,
+      vu_avg,
+      vu_ultimo: ultimo.vu,
+      data_ultimo: ultimo.raw,
+      mensal,
+      dow,
+      melhor_mes,
+    });
+  }
+
+  out.sort((a, b2) => b2.n_total - a.n_total || a.produto.localeCompare(b2.produto, "pt-BR"));
+  return out;
+}
+
+export type DashboardData = {
+  notas: NotaWithItens[];
+  gastoCategoria: GastoCategoria[];
+  inflacao: InflacaoCesta | null;
+};
+
+export async function getDashboardData(): Promise<DashboardData> {
+  await ready();
+  const { categorizarPorDicionario } = await import("./categorizar");
+
+  const [notasRows, itensRows, categoriasCache] = (await Promise.all([
+    sql()`SELECT * FROM notas ORDER BY data_emissao DESC, id DESC`,
+    sql()`SELECT * FROM itens`,
+    sql()`SELECT produto, categoria FROM produto_categorias`,
+  ])) as [NotaRow[], ItemRow[], Array<{ produto: string; categoria: string }>];
+
+  const byNota = new Map<number, ItemRow[]>();
+  for (const it of itensRows) {
+    const nid = Number(it.nota_id);
+    const list = byNota.get(nid) ?? [];
+    list.push({ ...it, id: Number(it.id), nota_id: nid });
+    byNota.set(nid, list);
+  }
+  const notas: NotaWithItens[] = notasRows.map((n) => ({
+    ...n,
+    id: Number(n.id),
+    itens: byNota.get(Number(n.id)) ?? [],
+  }));
+
+  const cacheCat = new Map(categoriasCache.map((c) => [c.produto, c.categoria]));
+  const gastoAgg = new Map<string, { total: number; n: number }>();
+  for (const it of itensRows) {
+    if (!it.produto || !it.produto.trim()) continue;
+    const upper = it.produto.toUpperCase().trim();
+    const cat = categorizarPorDicionario(upper) ?? cacheCat.get(upper) ?? "OUTROS";
+    const cur = gastoAgg.get(cat) ?? { total: 0, n: 0 };
+    cur.total += Number(it.vt);
+    cur.n += 1;
+    gastoAgg.set(cat, cur);
+  }
+  const gastoCategoria: GastoCategoria[] = [...gastoAgg.entries()]
+    .map(([categoria, v]) => ({ categoria, total: v.total, n_itens: v.n }))
+    .sort((a, b) => b.total - a.total);
+
+  type Series = Map<string, number[]>;
+  const buckets = new Map<string, { mes: Series }>();
+  const notaById = new Map(notasRows.map((n) => [Number(n.id), n.data_emissao]));
+  for (const it of itensRows) {
+    if (!(it.vu > 0)) continue;
+    const data = notaById.get(Number(it.nota_id));
+    if (!data) continue;
+    const parsed = /^\d{2}\/\d{2}\/\d{4}$/.test(data)
+      ? (() => {
+          const [dd, mm, yyyy] = data.split("/");
+          return `${yyyy}-${mm}`;
+        })()
+      : null;
+    if (!parsed) continue;
+    const codigo = it.codigo && it.codigo.trim() ? it.codigo.trim() : null;
+    const key = codigo ? `c:${codigo}` : `p:${it.produto}`;
+    let b = buckets.get(key);
+    if (!b) {
+      b = { mes: new Map() };
+      buckets.set(key, b);
+    }
+    const arr = b.mes.get(parsed) ?? [];
+    arr.push(Number(it.vu));
+    b.mes.set(parsed, arr);
+  }
+
+  const variacoes: number[] = [];
+  let primeiro = "";
+  let ultimo = "";
+  for (const b of buckets.values()) {
+    const meses = [...b.mes.entries()].sort(([a], [bm]) => a.localeCompare(bm));
+    if (meses.length < 2) continue;
+    const [ymA, vusA] = meses[0];
+    const [ymB, vusB] = meses[meses.length - 1];
+    const avgA = vusA.reduce((s, x) => s + x, 0) / vusA.length;
+    const avgB = vusB.reduce((s, x) => s + x, 0) / vusB.length;
+    if (avgA <= 0 || ymA === ymB) continue;
+    variacoes.push((avgB - avgA) / avgA);
+    if (!primeiro || ymA < primeiro) primeiro = ymA;
+    if (!ultimo || ymB > ultimo) ultimo = ymB;
+  }
+  const inflacao: InflacaoCesta | null = variacoes.length
+    ? {
+        variacao_pct: (variacoes.reduce((a, b) => a + b, 0) / variacoes.length) * 100,
+        primeiro_mes: primeiro,
+        ultimo_mes: ultimo,
+        n_produtos: variacoes.length,
+      }
+    : null;
+
+  return { notas, gastoCategoria, inflacao };
+}
+
+export type GastoCategoria = { categoria: string; total: number; n_itens: number };
+
+export async function getGastoPorCategoria(): Promise<GastoCategoria[]> {
+  await ready();
+  const { categorizarPorDicionario } = await import("./categorizar");
+
+  const rows = (await sql()`
+    SELECT i.produto, i.vt
+      FROM itens i
+     WHERE TRIM(i.produto) <> ''
+  `) as Array<{ produto: string; vt: number }>;
+  if (rows.length === 0) return [];
+
+  const cached = (await sql()`SELECT produto, categoria FROM produto_categorias`) as Array<{
+    produto: string;
+    categoria: string;
+  }>;
+  const cacheMap = new Map(cached.map((c) => [c.produto, c.categoria]));
+
+  const agg = new Map<string, { total: number; n: number }>();
+  for (const r of rows) {
+    const upper = r.produto.toUpperCase().trim();
+    const cat =
+      categorizarPorDicionario(upper) ?? cacheMap.get(upper) ?? "OUTROS";
+    const cur = agg.get(cat) ?? { total: 0, n: 0 };
+    cur.total += Number(r.vt);
+    cur.n += 1;
+    agg.set(cat, cur);
+  }
+
+  return [...agg.entries()]
+    .map(([categoria, v]) => ({ categoria, total: v.total, n_itens: v.n }))
+    .sort((a, b) => b.total - a.total);
+}
+
+export type InflacaoCesta = {
+  variacao_pct: number;
+  primeiro_mes: string;
+  ultimo_mes: string;
+  n_produtos: number;
+};
+
+export async function getInflacaoCesta(): Promise<InflacaoCesta | null> {
+  const series = await getSeriesPrecos();
+  const recorrentes = series.filter((s) => s.mensal.length >= 2);
+  if (recorrentes.length === 0) return null;
+
+  const variacoes: number[] = [];
+  let primeiro = "";
+  let ultimo = "";
+  for (const s of recorrentes) {
+    const first = s.mensal[0];
+    const last = s.mensal[s.mensal.length - 1];
+    if (first.ym === last.ym || first.vu_avg <= 0) continue;
+    variacoes.push((last.vu_avg - first.vu_avg) / first.vu_avg);
+    if (!primeiro || first.ym < primeiro) primeiro = first.ym;
+    if (!ultimo || last.ym > ultimo) ultimo = last.ym;
+  }
+  if (variacoes.length === 0) return null;
+
+  const media = variacoes.reduce((a, b) => a + b, 0) / variacoes.length;
+  return {
+    variacao_pct: media * 100,
+    primeiro_mes: primeiro,
+    ultimo_mes: ultimo,
+    n_produtos: variacoes.length,
+  };
 }
 
 function compareDataEmissaoDesc(a: string, b: string): number {

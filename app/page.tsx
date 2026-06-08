@@ -1,10 +1,10 @@
-import { listNotas } from "@/lib/db";
+import { getDashboardData } from "@/lib/db";
 import Dashboard, { type NotaPayload } from "./Dashboard";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 export default async function Home() {
-  const rows = await listNotas();
+  const { notas: rows, gastoCategoria, inflacao } = await getDashboardData();
   const notas: NotaPayload[] = rows.map((n) => ({
     id: n.id,
     numero: n.numero,
@@ -27,5 +27,11 @@ export default async function Home() {
       vt: i.vt,
     })),
   }));
-  return <Dashboard notas={notas} />;
+  return (
+    <Dashboard
+      notas={notas}
+      gastoCategoria={gastoCategoria}
+      inflacao={inflacao}
+    />
+  );
 }

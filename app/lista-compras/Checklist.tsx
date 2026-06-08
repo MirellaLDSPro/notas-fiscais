@@ -12,7 +12,10 @@ const C = {
   muted: "#8a9690",
   accent: "#d4ff4f",
   accent2: "#5fb89a",
+  warn: "#ff7a59",
 };
+
+const ALERT_THRESHOLD = 1.10;
 
 const STORAGE_KEY = "lista-compras:checked-v1";
 
@@ -186,6 +189,20 @@ export default function Checklist({ items }: { items: ListaCompraItem[] }) {
                     </span>
                     <span>preço médio {fmtBRL(it.preco_medio)}</span>
                     <span>últ. {it.ultima_compra}</span>
+                    {it.preco_medio > 0 &&
+                      it.vu_ultimo > it.preco_medio * ALERT_THRESHOLD && (
+                        <span
+                          style={{ color: C.warn, fontWeight: 600 }}
+                          title={`Última compra ${fmtBRL(it.vu_ultimo)} (+${(((it.vu_ultimo - it.preco_medio) / it.preco_medio) * 100).toFixed(0)}% vs média)`}
+                        >
+                          ▲ acima da média (
+                          {(
+                            ((it.vu_ultimo - it.preco_medio) / it.preco_medio) *
+                            100
+                          ).toFixed(0)}
+                          %)
+                        </span>
+                      )}
                   </div>
                 </div>
                 {it.produtos.length > 1 && (

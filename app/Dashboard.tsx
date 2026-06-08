@@ -14,6 +14,8 @@ import {
 } from "recharts";
 import UploadDropzone from "./UploadDropzone";
 import MonthNotasModal from "./MonthNotasModal";
+import SearchableSelect from "./SearchableSelect";
+import type { GastoCategoria, InflacaoCesta } from "@/lib/db";
 
 export type NotaPayload = {
   id: number;
@@ -41,6 +43,7 @@ export type NotaPayload = {
 type FlatRow = {
   data: string;
   prod: string;
+  codigo: string | null;
   qt: number;
   un: string | null;
   vu: number;
@@ -48,6 +51,9 @@ type FlatRow = {
   nota: string;
   emitente: string;
 };
+
+const groupKey = (codigo: string | null, prod: string): string =>
+  codigo && codigo.trim() ? `c:${codigo.trim()}` : `p:${prod}`;
 
 const C = {
   bg: "#0d0f0e",
@@ -91,13 +97,28 @@ const ChartTip = ({ active, payload, fmt }: ChartTipProps) =>
     </div>
   ) : null;
 
-export default function Dashboard({ notas }: { notas: NotaPayload[] }) {
+const MES_NAME = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+const ymToLabel = (ym: string) => {
+  const [y, m] = ym.split("-");
+  return `${MES_NAME[+m - 1]}/${y.slice(2)}`;
+};
+
+export default function Dashboard({
+  notas,
+  gastoCategoria,
+  inflacao,
+}: {
+  notas: NotaPayload[];
+  gastoCategoria: GastoCategoria[];
+  inflacao: InflacaoCesta | null;
+}) {
   const data: FlatRow[] = useMemo(
     () =>
       notas.flatMap((n) =>
         n.itens.map((i) => ({
           data: n.data_emissao,
           prod: i.produto,
+          codigo: i.codigo,
           qt: i.qt,
           un: i.un,
           vu: i.vu,
@@ -125,19 +146,32 @@ export default function Dashboard({ notas }: { notas: NotaPayload[] }) {
   );
 
   const comp = useMemo(() => {
-    const m = new Map<string, { prod: string; vus: number[]; vt: number }>();
+    type Bucket = {
+      key: string;
+      vus: number[];
+      vt: number;
+      nameCounts: Map<string, number>;
+    };
+    const m = new Map<string, Bucket>();
     for (const r of data) {
-      const cur = m.get(r.prod) ?? { prod: r.prod, vus: [], vt: 0 };
+      const k = groupKey(r.codigo, r.prod);
+      let cur = m.get(k);
+      if (!cur) {
+        cur = { key: k, vus: [], vt: 0, nameCounts: new Map() };
+        m.set(k, cur);
+      }
       cur.vus.push(r.vu);
       cur.vt += r.vt;
-      m.set(r.prod, cur);
+      cur.nameCounts.set(r.prod, (cur.nameCounts.get(r.prod) ?? 0) + 1);
     }
     return [...m.values()].map((p) => {
       const min = Math.min(...p.vus);
       const max = Math.max(...p.vus);
       const avg = p.vus.reduce((a, b) => a + b, 0) / p.vus.length;
+      const prod = [...p.nameCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
       return {
-        prod: p.prod,
+        key: p.key,
+        prod,
         min,
         max,
         avg,
@@ -158,8 +192,8 @@ export default function Dashboard({ notas }: { notas: NotaPayload[] }) {
     () =>
       comp
         .filter((c) => c.n > 1)
-        .map((c) => c.prod)
-        .sort(),
+        .map((c) => ({ key: c.key, prod: c.prod }))
+        .sort((a, b) => a.prod.localeCompare(b.prod)),
     [comp]
   );
 
@@ -207,7 +241,7 @@ export default function Dashboard({ notas }: { notas: NotaPayload[] }) {
   const [itemBusca, setItemBusca] = useState("");
   const [evoProd, setEvoProd] = useState<string>("");
 
-  const evoProdActual = evoProd || repItems[0] || "";
+  const evoProdActual = evoProd || repItems[0]?.key || "";
 
   if (data.length === 0) {
     return (
@@ -287,7 +321,7 @@ export default function Dashboard({ notas }: { notas: NotaPayload[] }) {
   const notasData = notasSummary.map((n) => ({ name: n.data, total: n.total }));
 
   const evoData = data
-    .filter((r) => r.prod === evoProdActual)
+    .filter((r) => groupKey(r.codigo, r.prod) === evoProdActual)
     .sort((a, b) => parseD(a.data).getTime() - parseD(b.data).getTime())
     .map((r) => ({ data: r.data, vu: r.vu }));
 
@@ -424,6 +458,41 @@ export default function Dashboard({ notas }: { notas: NotaPayload[] }) {
             </div>
           ))}
         </div>
+
+        {inflacao && (
+          <div style={card}>
+            <h3 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 2px" }}>
+              Inflação da sua cesta
+            </h3>
+            <p style={{ fontSize: 12, color: C.muted, margin: "0 0 14px" }}>
+              Variação média de preço dos {inflacao.n_produtos} produtos com histórico,
+              entre {ymToLabel(inflacao.primeiro_mes)} e {ymToLabel(inflacao.ultimo_mes)}.
+            </p>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "baseline",
+                gap: 10,
+                flexWrap: "wrap",
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 28,
+                  fontWeight: 800,
+                  color: inflacao.variacao_pct >= 0 ? C.warn : C.accent2,
+                  letterSpacing: "-.02em",
+                }}
+              >
+                {inflacao.variacao_pct >= 0 ? "▲" : "▼"}{" "}
+                {Math.abs(inflacao.variacao_pct).toFixed(1)}%
+              </span>
+              <span style={{ fontSize: 12, color: C.muted }}>
+                {inflacao.variacao_pct >= 0 ? "mais cara" : "mais barata"} no período
+              </span>
+            </div>
+          </div>
+        )}
 
         {creditosBySituacao.total > 0 && (
           <div style={card}>
@@ -596,19 +665,70 @@ export default function Dashboard({ notas }: { notas: NotaPayload[] }) {
           </div>
         </div>
 
+        {gastoCategoria.length > 0 && (
+          <div style={card}>
+            <h3 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 2px" }}>
+              Gasto por categoria
+            </h3>
+            <p style={{ fontSize: 12, color: C.muted, margin: "0 0 14px" }}>
+              Top 10 categorias por gasto acumulado.
+            </p>
+            <div style={{ width: "100%", height: 300 }}>
+              {mounted && (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={gastoCategoria.slice(0, 10).map((g) => ({
+                      name:
+                        g.categoria.length > 14
+                          ? g.categoria.slice(0, 13) + "…"
+                          : g.categoria,
+                      total: g.total,
+                    }))}
+                    layout="vertical"
+                    margin={{ top: 4, right: 8, left: 4, bottom: 4 }}
+                  >
+                    <CartesianGrid stroke={C.line} horizontal={false} />
+                    <XAxis
+                      type="number"
+                      tick={{ fill: C.muted, fontSize: 11 }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(v) => "R$" + v}
+                    />
+                    <YAxis
+                      type="category"
+                      dataKey="name"
+                      tick={{ fill: C.muted, fontSize: 10 }}
+                      axisLine={false}
+                      tickLine={false}
+                      width={108}
+                    />
+                    <Tooltip
+                      content={<ChartTip fmt={BRL} />}
+                      cursor={{ fill: "rgba(255,255,255,.04)" }}
+                    />
+                    <Bar dataKey="total" fill={C.accent} radius={[0, 6, 6, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+        )}
+
         {repItems.length > 0 && (
           <div style={card}>
             <h3 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 2px" }}>Evolução de preço</h3>
             <p style={{ fontSize: 12, color: C.muted, margin: "0 0 12px" }}>
               Preço unitário do mesmo item em datas diferentes.
             </p>
-            <select style={sel} value={evoProdActual} onChange={(e) => setEvoProd(e.target.value)}>
-              {repItems.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
+            <div style={{ marginBottom: 8 }}>
+              <SearchableSelect
+                options={repItems.map((p) => ({ key: p.key, label: p.prod }))}
+                value={evoProdActual}
+                onChange={setEvoProd}
+                placeholder="Buscar produto…"
+              />
+            </div>
             <div style={{ width: "100%", height: 240 }}>
               {mounted && (
                 <ResponsiveContainer width="100%" height="100%">

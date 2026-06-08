@@ -1,7 +1,7 @@
 import { getListaCompras } from "@/lib/db";
 import Checklist from "./Checklist";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 const C = {
   bg: "#0d0f0e",
