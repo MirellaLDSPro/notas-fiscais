@@ -323,6 +323,18 @@ export default async function Home() {
               body: "Acompanhe como o preço unitário de um produto específico se comporta ao longo do tempo.",
               alt: "Gráfico de linha mostrando a evolução do preço unitário de um produto",
             },
+            {
+              src: "/landing-chart-mes.png",
+              title: "Preço médio por mês",
+              body: "Veja em quais meses do ano o produto costuma ficar mais barato e planeje compras na sazonalidade certa.",
+              alt: "Gráfico de linha mostrando o preço médio por mês de emissão",
+            },
+            {
+              src: "/landing-chart-dia-semana.png",
+              title: "Preço por dia da semana",
+              body: "Identifique promoções recorrentes (ex.: hortifrúti mais barato na quarta) e otimize o dia da compra.",
+              alt: "Gráfico de barras com o preço médio por dia da semana",
+            },
           ].map((g) => (
             <div
               key={g.src}
