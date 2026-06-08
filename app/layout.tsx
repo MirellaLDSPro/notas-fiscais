@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Menu from "./Menu";
+import { auth, signOut } from "@/auth";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -18,18 +19,27 @@ export const metadata: Metadata = {
   description: "Dashboard de cupons fiscais (NFC-e) com upload de PDF.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const session = await auth();
+
+  async function logout() {
+    "use server";
+    await signOut({ redirectTo: "/login" });
+  }
+
   return (
     <html lang="pt-BR" className={`${geistSans.variable} ${geistMono.variable}`}>
       <body
         suppressHydrationWarning
         style={{ margin: 0, background: "#0d0f0e" }}
       >
-        <Menu />
+        {session?.user && (
+          <Menu userEmail={session.user.email ?? null} logoutAction={logout} />
+        )}
         {children}
       </body>
     </html>

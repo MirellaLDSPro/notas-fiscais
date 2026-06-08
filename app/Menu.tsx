@@ -21,7 +21,12 @@ const ITEMS: Item[] = [
   { href: "/contato", label: "Contato", sub: "Falar com a autora do projeto" },
 ];
 
-export default function Menu() {
+type MenuProps = {
+  userEmail: string | null;
+  logoutAction: () => Promise<void>;
+};
+
+export default function Menu({ userEmail, logoutAction }: MenuProps) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
 
@@ -200,16 +205,46 @@ export default function Menu() {
             <div style={{ flex: 1 }} />
             <div
               style={{
-                fontFamily: "monospace",
-                fontSize: 10,
-                letterSpacing: ".08em",
-                color: C.muted,
-                textAlign: "center",
                 paddingTop: 12,
                 borderTop: `1px solid ${C.line}`,
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
               }}
             >
-              painel NFC-e · v0.1
+              {userEmail && (
+                <div style={{ fontSize: 11, color: C.muted, wordBreak: "break-all" }}>
+                  {userEmail}
+                </div>
+              )}
+              <form action={logoutAction}>
+                <button
+                  type="submit"
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px",
+                    background: C.panel2,
+                    border: `1px solid ${C.line}`,
+                    borderRadius: 8,
+                    color: C.ink,
+                    fontSize: 13,
+                    cursor: "pointer",
+                  }}
+                >
+                  Sair
+                </button>
+              </form>
+              <div
+                style={{
+                  fontFamily: "monospace",
+                  fontSize: 10,
+                  letterSpacing: ".08em",
+                  color: C.muted,
+                  textAlign: "center",
+                }}
+              >
+                painel NFC-e · v0.1
+              </div>
             </div>
           </nav>
         </div>
