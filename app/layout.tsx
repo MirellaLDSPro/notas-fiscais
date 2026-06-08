@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Menu from "./Menu";
 import { auth, signOut } from "@/auth";
+import { listOwnersSharingWith } from "@/lib/db";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -25,6 +26,9 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const session = await auth();
+  const sharedWithMe = session?.user?.email
+    ? await listOwnersSharingWith(session.user.email)
+    : [];
 
   async function logout() {
     "use server";
@@ -38,7 +42,11 @@ export default async function RootLayout({
         style={{ margin: 0, background: "#0d0f0e" }}
       >
         {session?.user && (
-          <Menu userEmail={session.user.email ?? null} logoutAction={logout} />
+          <Menu
+            userEmail={session.user.email ?? null}
+            logoutAction={logout}
+            sharedWithMe={sharedWithMe}
+          />
         )}
         {children}
       </body>

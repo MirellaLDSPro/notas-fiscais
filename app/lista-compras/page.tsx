@@ -1,7 +1,7 @@
-import { redirect } from "next/navigation";
-import { auth, userIdFromSession } from "@/auth";
+import { resolveDataOwner } from "@/auth";
 import { getListaCompras } from "@/lib/db";
 import Checklist from "./Checklist";
+import ViewingAsBanner from "../ViewingAsBanner";
 
 export const dynamic = "force-dynamic";
 
@@ -21,10 +21,14 @@ const sectionTitle: React.CSSProperties = {
   marginBottom: 10,
 };
 
-export default async function ListaComprasPage() {
-  const userId = userIdFromSession(await auth());
-  if (!userId) redirect("/login");
-  const items = await getListaCompras(userId);
+export default async function ListaComprasPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ owner?: string }>;
+}) {
+  const { owner } = await searchParams;
+  const { dataUserId, viewingAs } = await resolveDataOwner(owner);
+  const items = await getListaCompras(dataUserId);
 
   return (
     <div
@@ -37,6 +41,7 @@ export default async function ListaComprasPage() {
       }}
     >
       <div style={{ maxWidth: 760, margin: "0 auto" }}>
+        {viewingAs && <ViewingAsBanner viewingAs={viewingAs} exitHref="/lista-compras" />}
         <div style={sectionTitle}>Compras · recorrentes</div>
         <h1 style={{ margin: 0, marginBottom: 6, fontSize: 26 }}>Lista de compras</h1>
         <p style={{ margin: 0, marginBottom: 20, color: C.muted, fontSize: 13 }}>

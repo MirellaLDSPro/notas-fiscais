@@ -1,14 +1,17 @@
-import { redirect } from "next/navigation";
-import { auth, userIdFromSession } from "@/auth";
+import { resolveDataOwner } from "@/auth";
 import { getDashboardData } from "@/lib/db";
 import Dashboard, { type NotaPayload } from "../Dashboard";
 
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
-  const userId = userIdFromSession(await auth());
-  if (!userId) redirect("/login");
-  const { notas: rows, gastoCategoria, inflacao } = await getDashboardData(userId);
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ owner?: string }>;
+}) {
+  const { owner } = await searchParams;
+  const { dataUserId, viewingAs } = await resolveDataOwner(owner);
+  const { notas: rows, gastoCategoria, inflacao } = await getDashboardData(dataUserId);
   const notas: NotaPayload[] = rows.map((n) => ({
     id: n.id,
     numero: n.numero,
@@ -36,6 +39,8 @@ export default async function DashboardPage() {
       notas={notas}
       gastoCategoria={gastoCategoria}
       inflacao={inflacao}
+      readOnly={!!viewingAs}
+      viewingAs={viewingAs}
     />
   );
 }

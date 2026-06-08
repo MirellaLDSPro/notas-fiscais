@@ -13,6 +13,13 @@ import {
   CartesianGrid,
 } from "recharts";
 import UploadDropzone from "./UploadDropzone";
+import ViewingAsBanner from "./ViewingAsBanner";
+
+type ViewingAs = {
+  ownerUserId: number;
+  email: string;
+  name: string | null;
+};
 import MonthNotasModal from "./MonthNotasModal";
 import SearchableSelect from "./SearchableSelect";
 import type { GastoCategoria, InflacaoCesta } from "@/lib/db";
@@ -107,10 +114,14 @@ export default function Dashboard({
   notas,
   gastoCategoria,
   inflacao,
+  readOnly = false,
+  viewingAs = null,
 }: {
   notas: NotaPayload[];
   gastoCategoria: GastoCategoria[];
   inflacao: InflacaoCesta | null;
+  readOnly?: boolean;
+  viewingAs?: ViewingAs | null;
 }) {
   const data: FlatRow[] = useMemo(
     () =>
@@ -279,9 +290,11 @@ export default function Dashboard({
             Comece enviando um <em style={{ color: C.accent2 }}>cupom fiscal</em>.
           </h1>
           <p style={{ color: C.muted, fontSize: 14, margin: "0 0 24px" }}>
-            Os PDFs da NFC-e (igual aos da Fazenda SP) vão alimentar o painel.
+            {readOnly
+              ? "Este relatório ainda não tem cupons enviados."
+              : "Os PDFs da NFC-e (igual aos da Fazenda SP) vão alimentar o painel."}
           </p>
-          <UploadDropzone />
+          {!readOnly && <UploadDropzone />}
         </div>
       </div>
     );
@@ -419,10 +432,14 @@ export default function Dashboard({
           Onde foi <em style={{ color: C.accent2 }}>seu</em> dinheiro.
         </h1>
         <p style={{ color: C.muted, fontSize: 14, margin: "0 0 24px" }}>
-          Base consolidada dos seus cupons fiscais.
+          {readOnly
+            ? "Base consolidada dos cupons deste relatório."
+            : "Base consolidada dos seus cupons fiscais."}
         </p>
 
-        <UploadDropzone />
+        {viewingAs && <ViewingAsBanner viewingAs={viewingAs} exitHref="/dashboard" />}
+
+        {!readOnly && <UploadDropzone />}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 24 }}>
           {kpis.map((k, i) => (

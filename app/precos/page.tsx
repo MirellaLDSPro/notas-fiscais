@@ -1,7 +1,7 @@
-import { redirect } from "next/navigation";
-import { auth, userIdFromSession } from "@/auth";
+import { resolveDataOwner } from "@/auth";
 import { getSeriesPrecos } from "@/lib/db";
 import PrecosClient from "./PrecosClient";
+import ViewingAsBanner from "../ViewingAsBanner";
 
 export const dynamic = "force-dynamic";
 
@@ -12,10 +12,14 @@ const C = {
   accent: "#d4ff4f",
 };
 
-export default async function PrecosPage() {
-  const userId = userIdFromSession(await auth());
-  if (!userId) redirect("/login");
-  const series = await getSeriesPrecos(userId);
+export default async function PrecosPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ owner?: string }>;
+}) {
+  const { owner } = await searchParams;
+  const { dataUserId, viewingAs } = await resolveDataOwner(owner);
+  const series = await getSeriesPrecos(dataUserId);
 
   return (
     <div
@@ -28,6 +32,7 @@ export default async function PrecosPage() {
       }}
     >
       <div style={{ maxWidth: 760, margin: "0 auto" }}>
+        {viewingAs && <ViewingAsBanner viewingAs={viewingAs} exitHref="/precos" />}
         <div
           style={{
             fontFamily: "monospace",

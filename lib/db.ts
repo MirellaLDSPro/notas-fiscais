@@ -117,6 +117,17 @@ async function initSchema(): Promise<void> {
       WHERE cnpj IS NOT NULL
   `;
   await sql()`CREATE INDEX IF NOT EXISTS idx_notas_user ON notas(user_id)`;
+
+  await sql()`
+    CREATE TABLE IF NOT EXISTS report_shares (
+      id BIGSERIAL PRIMARY KEY,
+      owner_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      shared_with_email TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS'),
+      UNIQUE (owner_user_id, shared_with_email)
+    )
+  `;
+  await sql()`CREATE INDEX IF NOT EXISTS idx_report_shares_email ON report_shares(shared_with_email)`;
 }
 
 export async function ensureUserByEmail(
@@ -133,6 +144,102 @@ export async function ensureUserByEmail(
     RETURNING id
   `) as Array<{ id: number }>;
   return Number(rows[0].id);
+}
+
+export type ShareGrant = {
+  email: string;
+  created_at: string;
+};
+
+export async function addShare(
+  ownerUserId: number,
+  email: string
+): Promise<"created" | "exists" | "invalid"> {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized || !normalized.includes("@")) return "invalid";
+  await ready();
+  const ownerRow = (await sql()`
+    SELECT email FROM users WHERE id = ${ownerUserId}
+  `) as Array<{ email: string }>;
+  if (ownerRow[0]?.email?.toLowerCase() === normalized) return "invalid";
+  const result = (await sql()`
+    INSERT INTO report_shares (owner_user_id, shared_with_email)
+    VALUES (${ownerUserId}, ${normalized})
+    ON CONFLICT (owner_user_id, shared_with_email) DO NOTHING
+    RETURNING id
+  `) as Array<{ id: number }>;
+  return result.length ? "created" : "exists";
+}
+
+export async function removeShare(ownerUserId: number, email: string): Promise<void> {
+  const normalized = email.trim().toLowerCase();
+  await ready();
+  await sql()`
+    DELETE FROM report_shares
+     WHERE owner_user_id = ${ownerUserId}
+       AND shared_with_email = ${normalized}
+  `;
+}
+
+export async function listSharesByOwner(ownerUserId: number): Promise<ShareGrant[]> {
+  await ready();
+  const rows = (await sql()`
+    SELECT shared_with_email AS email, created_at
+      FROM report_shares
+     WHERE owner_user_id = ${ownerUserId}
+     ORDER BY created_at DESC, id DESC
+  `) as ShareGrant[];
+  return rows;
+}
+
+export type SharedOwner = {
+  ownerUserId: number;
+  email: string;
+  name: string | null;
+};
+
+export async function listOwnersSharingWith(viewerEmail: string): Promise<SharedOwner[]> {
+  const normalized = viewerEmail.trim().toLowerCase();
+  if (!normalized) return [];
+  await ready();
+  const rows = (await sql()`
+    SELECT u.id AS owner_user_id, u.email, u.name
+      FROM report_shares rs
+      JOIN users u ON u.id = rs.owner_user_id
+     WHERE rs.shared_with_email = ${normalized}
+     ORDER BY u.email
+  `) as Array<{ owner_user_id: number; email: string; name: string | null }>;
+  return rows.map((r) => ({
+    ownerUserId: Number(r.owner_user_id),
+    email: r.email,
+    name: r.name,
+  }));
+}
+
+export async function canViewAsOwner(
+  viewerEmail: string,
+  ownerUserId: number
+): Promise<boolean> {
+  const normalized = viewerEmail.trim().toLowerCase();
+  if (!normalized) return false;
+  await ready();
+  const rows = (await sql()`
+    SELECT 1 FROM report_shares
+     WHERE owner_user_id = ${ownerUserId}
+       AND shared_with_email = ${normalized}
+     LIMIT 1
+  `) as Array<{ "?column?": number }>;
+  return rows.length > 0;
+}
+
+export async function getUserById(
+  userId: number
+): Promise<{ email: string; name: string | null } | null> {
+  await ready();
+  const rows = (await sql()`
+    SELECT email, name FROM users WHERE id = ${userId}
+  `) as Array<{ email: string; name: string | null }>;
+  return rows[0] ?? null;
 }
 
 async function ready(): Promise<void> {

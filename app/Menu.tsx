@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import SearchableSelect from "./SearchableSelect";
 
 const C = {
   panel: "#161a18",
@@ -14,23 +15,55 @@ const C = {
   accent2: "#5fb89a",
 };
 
-type Item = { href: string; label: string; sub: string };
+type Item = { href: string; label: string; sub: string; ownerAware?: boolean };
 const ITEMS: Item[] = [
-  { href: "/dashboard", label: "Dashboard", sub: "Painel principal de notas e gastos" },
-  { href: "/lista-compras", label: "Lista de compras", sub: "Itens que você compra com frequência" },
-  { href: "/precos", label: "Preços por período", sub: "Quando cada produto fica mais barato" },
+  { href: "/dashboard", label: "Dashboard", sub: "Painel principal de notas e gastos", ownerAware: true },
+  { href: "/lista-compras", label: "Lista de compras", sub: "Itens que você compra com frequência", ownerAware: true },
+  { href: "/precos", label: "Preços por período", sub: "Quando cada produto fica mais barato", ownerAware: true },
   { href: "/receitas", label: "Receitas", sub: "O que cozinhar com suas últimas compras" },
+  { href: "/compartilhar", label: "Compartilhar relatório", sub: "Dar acesso de leitura a outro email" },
   { href: "/contato", label: "Contato", sub: "Falar com a autora do projeto" },
 ];
+
+type SharedOwner = {
+  ownerUserId: number;
+  email: string;
+  name: string | null;
+};
 
 type MenuProps = {
   userEmail: string | null;
   logoutAction: () => Promise<void>;
+  sharedWithMe?: SharedOwner[];
 };
 
-export default function Menu({ userEmail, logoutAction }: MenuProps) {
+export default function Menu({ userEmail, logoutAction, sharedWithMe = [] }: MenuProps) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const viewingOwnerId = searchParams.get("owner");
+  const viewingOwner = viewingOwnerId
+    ? sharedWithMe.find((o) => String(o.ownerUserId) === viewingOwnerId) ?? null
+    : null;
+  const backToMineHref =
+    pathname && ["/dashboard", "/lista-compras", "/precos"].includes(pathname)
+      ? pathname
+      : "/dashboard";
+
+  const sharedOptions = sharedWithMe.map((o) => ({
+    key: String(o.ownerUserId),
+    label: o.name?.trim() ? `${o.name.trim()} · ${o.email}` : o.email,
+  }));
+
+  const navigateToShared = (ownerKey: string) => {
+    setOpen(false);
+    const targetPath =
+      pathname && ["/dashboard", "/lista-compras", "/precos"].includes(pathname)
+        ? pathname
+        : "/dashboard";
+    router.push(`${targetPath}?owner=${ownerKey}`);
+  };
 
   useEffect(() => {
     setOpen(false);
@@ -172,12 +205,47 @@ export default function Menu({ userEmail, logoutAction }: MenuProps) {
               </button>
             </div>
 
-            {ITEMS.map((it) => {
+            {viewingOwner && (
+              <Link
+                href={backToMineHref}
+                style={{
+                  display: "block",
+                  padding: "12px 14px",
+                  background: C.panel2,
+                  border: `1px solid ${C.line}`,
+                  borderLeft: `3px solid ${C.accent}`,
+                  borderRadius: 10,
+                  color: C.ink,
+                  textDecoration: "none",
+                  marginBottom: 6,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: C.accent,
+                    marginBottom: 2,
+                  }}
+                >
+                  ← Voltar ao meu relatório
+                </div>
+                <div style={{ fontSize: 11, color: C.muted, wordBreak: "break-all" }}>
+                  Visualizando: {viewingOwner.name?.trim() || viewingOwner.email}
+                </div>
+              </Link>
+            )}
+
+            {ITEMS.filter((it) => !(viewingOwner && it.href === "/receitas")).map((it) => {
+              const href =
+                viewingOwner && it.ownerAware
+                  ? `${it.href}?owner=${viewingOwner.ownerUserId}`
+                  : it.href;
               const active = pathname === it.href;
               return (
                 <Link
                   key={it.href}
-                  href={it.href}
+                  href={href}
                   style={{
                     display: "block",
                     padding: "12px 14px",
@@ -203,6 +271,39 @@ export default function Menu({ userEmail, logoutAction }: MenuProps) {
                 </Link>
               );
             })}
+
+            {sharedWithMe.length > 0 && (
+              <div style={{ marginTop: 18 }}>
+                <div
+                  style={{
+                    marginBottom: 8,
+                    fontFamily: "monospace",
+                    fontSize: 10,
+                    letterSpacing: ".2em",
+                    textTransform: "uppercase",
+                    color: C.muted,
+                  }}
+                >
+                  Compartilhado comigo ({sharedWithMe.length})
+                </div>
+                <SearchableSelect
+                  options={sharedOptions}
+                  value={viewingOwnerId ?? ""}
+                  onChange={navigateToShared}
+                  placeholder="Buscar relatório…"
+                />
+                <div
+                  style={{
+                    marginTop: 6,
+                    fontSize: 11,
+                    color: C.muted,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  Abre em modo somente leitura.
+                </div>
+              </div>
+            )}
 
             <div style={{ flex: 1 }} />
             <div
