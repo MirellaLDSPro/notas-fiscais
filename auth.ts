@@ -1,5 +1,5 @@
 import NextAuth from "next-auth";
-import Google from "next-auth/providers/google";
+import authConfig from "./auth.config";
 import { ensureUserByEmail } from "@/lib/db";
 
 declare module "@auth/core/jwt" {
@@ -9,8 +9,7 @@ declare module "@auth/core/jwt" {
 }
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
-  providers: [Google],
-  session: { strategy: "jwt" },
+  ...authConfig,
   callbacks: {
     async signIn({ user, profile }) {
       const email = (profile?.email ?? user?.email ?? "").toLowerCase();
@@ -30,9 +29,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       }
       return session;
     },
-  },
-  pages: {
-    signIn: "/login",
   },
 });
 
