@@ -7,11 +7,12 @@ eletrônicos (NFC-e), planilhas próprias e o portal da Nota Fiscal Paulista (NF
 Fornece um painel com indicadores, listas de compras recorrentes e geração de
 receitas com IA a partir dos produtos comprados.
 
-- **Público-alvo:** uso pessoal/familiar; 1 a poucos usuários autorizados por
-  email (sem cadastro público).
+- **Público-alvo:** qualquer pessoa interessada em acompanhar seus gastos a
+  partir de cupons fiscais. Cadastro aberto via Google OAuth; cada conta tem
+  seu próprio workspace isolado.
 - **Domínio:** consumo doméstico no Brasil — supermercados, NFC-e/NFP, dados em
   PT-BR e BRL.
-- **Não é:** ERP, ferramenta fiscal/contábil, sistema multi-tenant.
+- **Não é:** ERP, ferramenta fiscal/contábil.
 
 ## 2. Requisitos funcionais
 
@@ -27,8 +28,10 @@ receitas com IA a partir dos produtos comprados.
 | RF08 | A lista de compras deve recalcular automaticamente a cada visita após um novo upload — sem cache persistente. |
 | RF09 | Em `/receitas`, o sistema deve gerar de 3 a 5 receitas brasileiras a partir dos produtos das **3 notas com itens mais recentes**, usando a Claude API (`claude-haiku-4-5`). |
 | RF10 | O sistema deve consultar a **BrasilAPI** para enriquecer endereços de estabelecimentos a partir do CNPJ e gravar em tabela própria. |
-| RF11 | O acesso a qualquer rota (exceto `/login` e `/api/auth/*`) deve exigir autenticação via **Google OAuth**, com email validado contra uma whitelist. |
-| RF12 | O usuário autenticado deve ver seu email no menu lateral e dispor de botão **Sair**. |
+| RF11 | O acesso às rotas de aplicação (exceto `/`, `/login` e `/api/auth/*`) deve exigir autenticação via **Google OAuth**. A landing `/` é pública. |
+| RF12 | Qualquer conta Google deve poder logar e ter um **workspace isolado**: as notas (`notas`/`itens`) são escopadas por `user_id` e cada usuário só vê os próprios dados. |
+| RF13 | No primeiro login de uma conta nova, o sistema deve criar registro em `users` automaticamente (upsert por email no callback `signIn` do NextAuth). |
+| RF14 | O usuário autenticado deve ver seu email no menu lateral e dispor de botão **Sair**, que redireciona para a landing pública `/`. |
 
 ## 3. Requisitos não funcionais
 
@@ -36,7 +39,7 @@ receitas com IA a partir dos produtos comprados.
 | --- | --- |
 | RNF01 | **Disponibilidade:** deploy serverless (Vercel) — alvo de cold start < 2 s para rotas dinâmicas. |
 | RNF02 | **Persistência:** banco gerenciado (Postgres no Neon) com schema criado lazy idempotente no primeiro acesso. |
-| RNF03 | **Segurança — auth:** tokens de sessão JWT, secret rotativo (`AUTH_SECRET`), cookies HttpOnly. Whitelist por email; sem self-signup. |
+| RNF03 | **Segurança — auth:** tokens de sessão JWT, secret estável (`AUTH_SECRET`) com o mesmo valor entre Production/Preview/Development (necessário para o cookie PKCE sobreviver ao round-trip do OAuth). Cookies HttpOnly. Cadastro aberto via Google — sem allowlist. |
 | RNF04 | **Segurança — segredos:** nenhum segredo no repositório; tudo via env vars (`.env.local` em dev, dashboard do Vercel em prod). |
 | RNF05 | **Privacidade:** dados pessoais (CPF, endereços, histórico de compras) ficam em DB privado; o repositório é público apenas com código, sem dados. |
 | RNF06 | **Usabilidade móvel:** layout responsivo otimizado para o celular (uso típico é durante e após compras). |
@@ -70,26 +73,37 @@ receitas com IA a partir dos produtos comprados.
 
 ### Variáveis de ambiente obrigatórias
 - `DATABASE_URL` — Postgres do Neon (`sslmode=require`).
-- `AUTH_SECRET` — 32 bytes base64 (`openssl rand -base64 32`).
-- `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` — OAuth client do Google.
-- `AUTH_ALLOWED_EMAILS` — lista de emails autorizados, separados por vírgula.
-- `AUTH_URL` (prod) — URL canônica do app no Vercel.
+- `AUTH_SECRET` — 32 bytes base64 (`openssl rand -base64 32`). Em prod, **mesmo valor** nos 3 ambientes do Vercel (Production/Preview/Development).
+- `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` — OAuth client do Google. Cada domínio que serve o app precisa estar nas Authorized redirect URIs do Google.
 
 ### Variáveis opcionais
 - `ANTHROPIC_API_KEY` — habilita `/receitas` e categorização IA da lista de compras.
 
+### Variáveis que **não** devem ser setadas
+- `AUTH_URL` / `NEXTAUTH_URL` — sem elas, Auth.js v5 detecta a origem via `x-forwarded-host` e cada domínio (custom + previews `.vercel.app`) funciona com seu próprio callback. Setar força um único callback e quebra o login nos outros domínios.
+- `AUTH_ALLOWED_EMAILS` — allowlist removida quando o cadastro virou aberto. Auth.js ignora.
+
 ## 5. Modelo de dados
 
 ```
-notas (id, numero, serie, data_emissao, emitente, cnpj, valor_total,
-       chave_acesso UNIQUE, creditos, situacao_credito, fonte, created_at,
-       UNIQUE (cnpj, numero))
-itens (id, nota_id FK, produto, codigo, qt, un, vu, vt)
+users (id, email UNIQUE, name, created_at)
+notas (id, user_id FK → users, numero, serie, data_emissao, emitente, cnpj,
+       valor_total, chave_acesso, creditos, situacao_credito, fonte, created_at,
+       UNIQUE (user_id, chave_acesso) WHERE chave_acesso IS NOT NULL,
+       UNIQUE (user_id, cnpj, numero) WHERE cnpj IS NOT NULL)
+itens (id, nota_id FK → notas, produto, codigo, qt, un, vu, vt)
 estabelecimentos (cnpj PK, razao_social, nome_fantasia, endereço completo,
                   latitude, longitude, fonte, updated_at)
 produto_categorias (produto PK, categoria, fonte, criado_em)
 ```
 
+- `notas` e `itens` são **per-user** (escopo via `user_id` em `notas`; `itens`
+  vincula por JOIN).
+- `estabelecimentos` e `produto_categorias` são **globais** por design — info
+  de CNPJ e mapeamento produto→categoria não dependem do comprador, e
+  compartilhar evita chamadas duplicadas a BrasilAPI e Anthropic.
+- As constraints únicas de nota são **per-user partial indexes** (toleram nulo),
+  permitindo que dois usuários tenham a mesma nota fiscal.
 - `notas.cnpj` é gravado **formatado** (`93.209.765/0697-45`); em
   `estabelecimentos.cnpj` é **só dígitos**. Helper `cnpjDigits()` em `lib/db.ts`.
 - `produto_categorias` é cache do classificador AI; o dicionário hardcoded em
@@ -97,10 +111,14 @@ produto_categorias (produto PK, categoria, fonte, criado_em)
 
 ## 6. Restrições / fora de escopo
 
-- **Sem cadastro público.** Whitelist de emails é a única forma de autorização.
-- **Sem multi-tenancy.** Todos os usuários autorizados veem os mesmos dados.
 - **Sem app mobile nativo.** PWA-friendly via browser; QR scanner usa
   `getUserMedia` (precisa HTTPS).
+- **Sem moderação ou rate-limit no cadastro.** Qualquer Google account loga;
+  workspace fica isolado, mas não há proteção contra criação massiva de
+  contas. Se isso virar problema, adicionar rate-limit no upload é a primeira
+  defesa razoável.
+- **Sem painel administrativo.** Não há interface pra listar/gerenciar
+  usuários — uso direto do Neon SQL Editor.
 - **Sem edição manual de notas via UI.** Correções precisam ser feitas no DB
   (Neon SQL Editor) ou re-upload do PDF original.
 - **Sem internacionalização.** PT-BR e BRL hardcoded.
@@ -118,5 +136,9 @@ produto_categorias (produto PK, categoria, fonte, criado_em)
 - **Chave de acesso** — identificador único de 44 dígitos da NFC-e.
 - **BrasilAPI** — serviço público que expõe consulta de CNPJ entre outros
   dados — usado para preencher endereço de estabelecimentos.
-- **Gate de acesso** — modelo de autenticação em que a app inteira fica atrás
-  de login, sem páginas públicas exceto o próprio login.
+- **Gate de acesso** — modelo de autenticação em que a maior parte da app
+  fica atrás de login. Aqui a landing `/` é pública (apresenta o produto) e o
+  resto exige autenticação.
+- **Workspace** — escopo de dados de um usuário. Cada conta Google gera um
+  workspace isolado: notas e itens são filtrados por `user_id` em todas as
+  queries.

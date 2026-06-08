@@ -1,6 +1,6 @@
 # Painel NFC-e
 
-Dashboard pessoal de gastos a partir de **cupons fiscais (NFC-e)**, **planilhas xlsx** e **consulta da Nota Fiscal Paulista**. Persistência em **Postgres** (Neon, serverless). Os únicos serviços externos chamados são:
+Dashboard multi-usuário de gastos a partir de **cupons fiscais (NFC-e)**, **planilhas xlsx** e **consulta da Nota Fiscal Paulista**. Login com qualquer conta Google — cada usuário tem seu próprio workspace isolado. Persistência em **Postgres** (Neon, serverless). Os únicos serviços externos chamados são:
 
 - Consultas a `brasilapi.com.br` para enriquecer endereço de estabelecimentos
 - Chamadas à API da Anthropic (`claude-haiku-4-5`) para gerar receitas a partir dos produtos comprados
@@ -25,7 +25,13 @@ cp .env.example .env.local      # preencha DATABASE_URL e ANTHROPIC_API_KEY
 
 `DATABASE_URL`: crie um projeto grátis no [Neon](https://neon.tech), copie a connection string "pooled" (sufixo `-pooler`) com `?sslmode=require`. O schema é criado no primeiro acesso ao banco.
 
-`ANTHROPIC_API_KEY`: opcional, só pra `/receitas`.
+`AUTH_SECRET`: gere com `openssl rand -base64 32`. Em prod, marque a var nos 3 ambientes (Production/Preview/Development) com o **mesmo valor** — secret diferente entre ambientes quebra o cookie PKCE do OAuth.
+
+`AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET`: credenciais OAuth do Google Cloud Console. No console do Google, adicione `https://SEU_DOMINIO/api/auth/callback/google` (uma entrada por domínio que você usa) nas Authorized redirect URIs.
+
+`ANTHROPIC_API_KEY`: opcional, só pra `/receitas` e categorização IA da `/lista-compras`.
+
+> **Não configure `AUTH_URL`** em prod — sem ela, Auth.js v5 detecta a origem da request via `x-forwarded-host` e cada domínio (custom + preview .vercel.app) funciona com seu próprio callback. Setar `AUTH_URL` força um único callback e quebra o login nos outros domínios.
 
 ## Como rodar
 
@@ -67,11 +73,15 @@ Notas são identificadas por **`chave_acesso` (se disponível)** ou pelo par **`
 
 ## Páginas
 
-| Rota | O que faz |
-| --- | --- |
-| `/` | Dashboard principal: KPIs, gráfico "Gasto por compra/mês" (clicável no modo mês → abre modal com as notas), top produtos, evolução de preço, créditos NFP, tabelas de comparação e detalhe item-a-item, upload e scanner de QR |
-| `/receitas` | Receitas geradas por Claude Haiku 4.5 a partir dos produtos das **últimas 3 notas com itens** (xlsx/PDF — NFP não conta porque não tem itens). Cache por hash do conjunto de produtos. |
-| `/contato` | Página estática com canais de contato. |
+| Rota | Auth | O que faz |
+| --- | --- | --- |
+| `/` | público | Landing page do produto (hero, recursos, screenshots, CTA "Entrar"). Se já logado, redireciona pra `/dashboard`. |
+| `/login` | público | Botão de login com Google. Pós-login vai pra `/dashboard`. |
+| `/dashboard` | auth | Dashboard principal: KPIs, gráfico "Gasto por compra/mês" (clicável → abre modal com as notas), top produtos, evolução de preço, créditos NFP, upload e scanner de QR. |
+| `/precos` | auth | Comparador de preço por produto recorrente — preço médio por mês e por dia da semana, melhor mês destacado. |
+| `/lista-compras` | auth | Categorias recorrentes (presentes em 2+ notas) como checklist interativo. Estado marcado fica salvo no aparelho. |
+| `/receitas` | auth | Receitas geradas por Claude Haiku 4.5 a partir dos produtos das **últimas 3 notas com itens** do usuário. Cache por hash do `userId + produtos`. |
+| `/contato` | auth | Página estática com canais de contato. |
 
 ## API
 
@@ -85,26 +95,37 @@ Notas são identificadas por **`chave_acesso` (se disponível)** ou pelo par **`
 ## Schema do banco
 
 ```sql
+users (
+  id, email (UNIQUE), name, created_at
+)
+
 notas (
-  id, numero, serie, data_emissao, emitente, cnpj,
-  valor_total, chave_acesso (UNIQUE), creditos, situacao_credito,
+  id, user_id (FK → users), numero, serie, data_emissao, emitente, cnpj,
+  valor_total, chave_acesso, creditos, situacao_credito,
   fonte ('PDF' | 'XLSX' | 'NFP'), created_at,
-  UNIQUE (cnpj, numero)
+  UNIQUE (user_id, chave_acesso) WHERE chave_acesso IS NOT NULL,
+  UNIQUE (user_id, cnpj, numero) WHERE cnpj IS NOT NULL
 )
 
 itens (
   id, nota_id (FK → notas), produto, codigo, qt, un, vu, vt
 )
 
-estabelecimentos (
+estabelecimentos (                -- tabela global, não por usuário
   cnpj (PK, só dígitos),
   razao_social, nome_fantasia,
   logradouro, numero, complemento, bairro, municipio, uf, cep,
-  latitude, longitude,        -- reservadas pra geocoding futuro
+  latitude, longitude,            -- reservadas pra geocoding futuro
   fonte ('PDF' | 'BRASIL_API'),
   updated_at
 )
+
+produto_categorias (              -- tabela global, cache do classificador IA
+  produto (PK), categoria, fonte, criado_em
+)
 ```
+
+**Isolamento multi-user:** toda query em `notas`/`itens` filtra por `user_id` (via JOIN quando vem de `itens`). `estabelecimentos` e `produto_categorias` são globais por design — endereço de CNPJ e mapeamento produto→categoria não dependem de quem comprou, e compartilhar evita chamadas duplicadas a BrasilAPI/Anthropic.
 
 CNPJ é gravado **formatado nas notas** (`93.209.765/0697-45`) e **só dígitos em estabelecimentos** (`93209765069745`). Use `cnpjDigits()` de `lib/db.ts` quando precisar comparar.
 
@@ -130,7 +151,17 @@ No console SQL do Neon (ou via `psql`):
 ```sql
 TRUNCATE itens, notas RESTART IDENTITY CASCADE;
 TRUNCATE estabelecimentos;
+TRUNCATE users RESTART IDENTITY CASCADE;
 ```
+
+Para apagar **só os dados de um usuário** (sem afetar os outros):
+
+```sql
+DELETE FROM notas WHERE user_id = (SELECT id FROM users WHERE email = 'fulano@example.com');
+DELETE FROM users WHERE email = 'fulano@example.com';
+```
+
+`itens` é removido em cascade via FK.
 
 ### Sincronizar endereços (BrasilAPI)
 
@@ -157,34 +188,47 @@ Use o **SQL Editor** do Neon (web), ou `psql` apontando para `DATABASE_URL`.
 ```
 dashboard-app/
 ├── app/
-│   ├── layout.tsx              # raiz + Menu sandwich
-│   ├── page.tsx                # server: lê DB e passa pro Dashboard
+│   ├── layout.tsx              # raiz + Menu sandwich (só renderiza quando logado)
+│   ├── page.tsx                # landing pública; redireciona pra /dashboard se logado
+│   ├── LandingScreenshot.tsx   # client: preview compacto + lightbox da screenshot do hero
 │   ├── Dashboard.tsx           # client: KPIs, gráficos, tabelas
 │   ├── UploadDropzone.tsx      # drag&drop + scanner button
 │   ├── QrScanButton.tsx        # leitor de QR Code (camera)
 │   ├── MonthNotasModal.tsx     # modal de notas do mês selecionado
 │   ├── Menu.tsx                # menu sandwich flutuante
+│   ├── SearchableSelect.tsx    # combobox usado em /precos
+│   ├── login/page.tsx          # server action: signIn("google")
+│   ├── dashboard/page.tsx      # server: auth + getDashboardData(userId)
+│   ├── precos/                 # comparador de preço por período
+│   ├── lista-compras/          # checklist por categoria
+│   ├── receitas/               # geração de receitas
 │   ├── contato/page.tsx
-│   ├── receitas/
-│   │   ├── page.tsx            # server: chama gerarReceitas()
-│   │   └── RefreshButton.tsx   # client: força regen via ?force=1
 │   └── api/
-│       ├── upload/route.ts
-│       ├── notas/route.ts
+│       ├── auth/[...nextauth]  # handlers do NextAuth
+│       ├── upload/route.ts     # multipart, escopa por userId
+│       ├── notas/route.ts      # GET das notas do userId logado
 │       ├── recipes/route.ts
 │       └── estabelecimentos/sync/route.ts
 ├── lib/
-│   ├── db.ts                   # Neon Postgres, schema lazy, upserts
+│   ├── db.ts                   # Neon Postgres, schema lazy, upserts (user-scoped)
 │   ├── parseNfce.ts            # PDF NFC-e → ParsedNota (com endereço)
 │   ├── parseXlsx.ts            # planilha → ParsedNota[]
 │   ├── parseNfpCsv.ts          # CSV UTF-16 → ParsedNota[] (header-only)
+│   ├── categorizar.ts          # dicionário + classificador IA (Anthropic)
 │   ├── brasilapi.ts            # cliente BrasilAPI com cache em memória
 │   └── recipes.ts              # gerador de receitas (Claude Haiku 4.5)
 ├── scripts/
 │   └── migrate-from-sqlite.ts  # importa data/notas.db antigo para o Neon
+├── auth.config.ts              # edge-safe: providers + session + pages (importado pelo middleware)
+├── auth.ts                     # full config: callbacks que tocam o DB (signIn/jwt/session)
+├── middleware.ts               # protege todas as rotas exceto /, /login, /api/auth, assets
 ├── next.config.ts              # serverExternalPackages + allowedDevOrigins
-└── .env.local                  # DATABASE_URL + ANTHROPIC_API_KEY (gitignored)
+└── .env.local                  # DATABASE_URL + AUTH_SECRET + Google OAuth + ANTHROPIC_API_KEY (gitignored)
 ```
+
+### Auth: split config
+
+`auth.config.ts` é **Edge-safe** (sem imports do `lib/db.ts`) e é importado pelo `middleware.ts`, que roda no Edge runtime do Vercel. `auth.ts` faz `{ ...authConfig, callbacks: { ... } }` e adiciona os callbacks que precisam do banco (`signIn` faz upsert do usuário, `jwt` carrega `uid`, `session` expõe `user.id`). Esse split é o que evita o erro `Edge Function referencing unsupported modules` que ocorre se o middleware indiretamente importar `node:fs`, drivers de banco, etc.
 
 ## Decisões de design relevantes
 
