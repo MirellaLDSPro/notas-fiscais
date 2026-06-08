@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { auth, userIdFromSession } from "@/auth";
 import { parseNfcePdf } from "@/lib/parseNfce";
 import { parseXlsxBuffer } from "@/lib/parseXlsx";
 import { parseNfpCsvBuffer } from "@/lib/parseNfpCsv";
@@ -32,6 +33,11 @@ async function parseFile(name: string, buf: Buffer): Promise<ParsedNota[]> {
 }
 
 export async function POST(request: Request) {
+  const userId = userIdFromSession(await auth());
+  if (!userId) {
+    return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
+  }
+
   const form = await request.formData();
   const files = form.getAll("file");
   if (!files.length) {
@@ -47,7 +53,7 @@ export async function POST(request: Request) {
       const parsed = await parseFile(name, buf);
       const notas: FileSummary[] = [];
       for (const p of parsed) {
-        const res = await upsertNota(p);
+        const res = await upsertNota(userId, p);
         if (p.fonte === "PDF" && p.cnpj && p.endereco) {
           await upsertEstabelecimento({
             cnpj: p.cnpj,

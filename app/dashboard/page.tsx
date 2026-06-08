@@ -1,10 +1,14 @@
+import { redirect } from "next/navigation";
+import { auth, userIdFromSession } from "@/auth";
 import { getDashboardData } from "@/lib/db";
 import Dashboard, { type NotaPayload } from "../Dashboard";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const { notas: rows, gastoCategoria, inflacao } = await getDashboardData();
+  const userId = userIdFromSession(await auth());
+  if (!userId) redirect("/login");
+  const { notas: rows, gastoCategoria, inflacao } = await getDashboardData(userId);
   const notas: NotaPayload[] = rows.map((n) => ({
     id: n.id,
     numero: n.numero,

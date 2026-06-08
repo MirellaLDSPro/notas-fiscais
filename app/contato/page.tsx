@@ -69,10 +69,10 @@ export default function ContatoPage() {
           <div style={{ ...row, paddingTop: 0 }}>
             <span style={{ color: C.muted }}>E-mail</span>
             <a
-              href="mailto:mirella.lins@mercos.com"
+              href="mailto:mirella.lds@gmail.com"
               style={{ color: C.accent, fontFamily: "monospace", textDecoration: "none" }}
             >
-              mirella.lins@mercos.com
+              mirella.lds@gmail.com
             </a>
           </div>
           <div style={row}>

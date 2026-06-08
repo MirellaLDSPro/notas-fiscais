@@ -87,16 +87,19 @@ export type RecipesResult =
   | { ok: true; payload: ReceitasPayload; cached: boolean }
   | { ok: false; error: RecipesError };
 
-export async function gerarReceitas(opts: { force?: boolean } = {}): Promise<RecipesResult> {
+export async function gerarReceitas(
+  userId: number,
+  opts: { force?: boolean } = {}
+): Promise<RecipesResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return { ok: false, error: { kind: "no_key" } };
 
-  const { notas, produtos } = await pickLastThreeNotasWithItems();
+  const { notas, produtos } = await pickLastThreeNotasWithItems(userId);
   if (produtos.length === 0) {
     return { ok: false, error: { kind: "no_items", notas_with_items: notas.length } };
   }
 
-  const key = createHash("sha256").update(produtos.join("\n")).digest("hex");
+  const key = createHash("sha256").update(`${userId}:${produtos.join("\n")}`).digest("hex");
   if (!opts.force && cache.has(key)) {
     return { ok: true, payload: cache.get(key)!, cached: true };
   }

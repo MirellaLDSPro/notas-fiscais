@@ -1,3 +1,5 @@
+import { redirect } from "next/navigation";
+import { auth, userIdFromSession } from "@/auth";
 import { gerarReceitas } from "@/lib/recipes";
 import RefreshButton from "./RefreshButton";
 
@@ -33,7 +35,9 @@ const sectionTitle: React.CSSProperties = {
 };
 
 export default async function ReceitasPage() {
-  const result = await gerarReceitas();
+  const userId = userIdFromSession(await auth());
+  if (!userId) redirect("/login");
+  const result = await gerarReceitas(userId);
 
   return (
     <div

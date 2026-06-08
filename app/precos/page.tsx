@@ -1,7 +1,9 @@
+import { redirect } from "next/navigation";
+import { auth, userIdFromSession } from "@/auth";
 import { getSeriesPrecos } from "@/lib/db";
 import PrecosClient from "./PrecosClient";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 const C = {
   bg: "#0d0f0e",
@@ -11,7 +13,9 @@ const C = {
 };
 
 export default async function PrecosPage() {
-  const series = await getSeriesPrecos();
+  const userId = userIdFromSession(await auth());
+  if (!userId) redirect("/login");
+  const series = await getSeriesPrecos(userId);
 
   return (
     <div

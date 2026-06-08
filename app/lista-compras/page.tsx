@@ -1,7 +1,9 @@
+import { redirect } from "next/navigation";
+import { auth, userIdFromSession } from "@/auth";
 import { getListaCompras } from "@/lib/db";
 import Checklist from "./Checklist";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 const C = {
   bg: "#0d0f0e",
@@ -20,7 +22,9 @@ const sectionTitle: React.CSSProperties = {
 };
 
 export default async function ListaComprasPage() {
-  const items = await getListaCompras();
+  const userId = userIdFromSession(await auth());
+  if (!userId) redirect("/login");
+  const items = await getListaCompras(userId);
 
   return (
     <div

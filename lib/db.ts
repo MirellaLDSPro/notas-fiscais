@@ -20,7 +20,17 @@ function sql(): NeonQueryFunction<false, false> {
   return globalThis.__nfce_sql;
 }
 
+const LEGACY_OWNER_EMAIL = "mirella.lds@gmail.com";
+
 async function initSchema(): Promise<void> {
+  await sql()`
+    CREATE TABLE IF NOT EXISTS users (
+      id BIGSERIAL PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      name TEXT,
+      created_at TEXT NOT NULL DEFAULT to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS')
+    )
+  `;
   await sql()`
     CREATE TABLE IF NOT EXISTS notas (
       id BIGSERIAL PRIMARY KEY,
@@ -30,12 +40,11 @@ async function initSchema(): Promise<void> {
       emitente TEXT NOT NULL,
       cnpj TEXT,
       valor_total DOUBLE PRECISION NOT NULL,
-      chave_acesso TEXT UNIQUE,
+      chave_acesso TEXT,
       creditos DOUBLE PRECISION NOT NULL DEFAULT 0,
       situacao_credito TEXT,
       fonte TEXT NOT NULL DEFAULT 'PDF',
-      created_at TEXT NOT NULL DEFAULT to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS'),
-      UNIQUE (cnpj, numero)
+      created_at TEXT NOT NULL DEFAULT to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS')
     )
   `;
   await sql()`
@@ -78,6 +87,52 @@ async function initSchema(): Promise<void> {
       criado_em TEXT NOT NULL DEFAULT to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS')
     )
   `;
+
+  // multi-user migration — idempotent
+  await sql()`
+    ALTER TABLE notas
+      ADD COLUMN IF NOT EXISTS user_id BIGINT REFERENCES users(id) ON DELETE CASCADE
+  `;
+  await sql()`
+    INSERT INTO users (email)
+    VALUES (${LEGACY_OWNER_EMAIL})
+    ON CONFLICT (email) DO NOTHING
+  `;
+  await sql()`
+    UPDATE notas
+       SET user_id = (SELECT id FROM users WHERE email = ${LEGACY_OWNER_EMAIL})
+     WHERE user_id IS NULL
+  `;
+  await sql()`ALTER TABLE notas ALTER COLUMN user_id SET NOT NULL`;
+  await sql()`ALTER TABLE notas DROP CONSTRAINT IF EXISTS notas_chave_acesso_key`;
+  await sql()`ALTER TABLE notas DROP CONSTRAINT IF EXISTS notas_cnpj_numero_key`;
+  await sql()`
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_notas_user_chave
+      ON notas(user_id, chave_acesso)
+      WHERE chave_acesso IS NOT NULL
+  `;
+  await sql()`
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_notas_user_cnpj_numero
+      ON notas(user_id, cnpj, numero)
+      WHERE cnpj IS NOT NULL
+  `;
+  await sql()`CREATE INDEX IF NOT EXISTS idx_notas_user ON notas(user_id)`;
+}
+
+export async function ensureUserByEmail(
+  email: string,
+  name: string | null
+): Promise<number> {
+  await ready();
+  const normalized = email.trim().toLowerCase();
+  const rows = (await sql()`
+    INSERT INTO users (email, name)
+    VALUES (${normalized}, ${name})
+    ON CONFLICT (email) DO UPDATE
+      SET name = COALESCE(EXCLUDED.name, users.name)
+    RETURNING id
+  `) as Array<{ id: number }>;
+  return Number(rows[0].id);
 }
 
 async function ready(): Promise<void> {
@@ -173,6 +228,7 @@ export async function upsertEstabelecimento(
 }
 
 export async function listCnpjsWithoutEstabelecimento(): Promise<string[]> {
+  // estabelecimentos é tabela global; varremos todos os CNPJs conhecidos.
   await ready();
   const rows = (await sql()`
     SELECT DISTINCT n.cnpj
@@ -253,12 +309,16 @@ export type UpsertResult = {
   action: "inserted" | "merged" | "skipped";
 };
 
-export async function upsertNota(parsed: ParsedNota): Promise<UpsertResult> {
+export async function upsertNota(
+  userId: number,
+  parsed: ParsedNota
+): Promise<UpsertResult> {
   await ready();
   const existingRows = (await sql()`
     SELECT id FROM notas
-     WHERE (${parsed.chave_acesso}::text IS NOT NULL AND chave_acesso = ${parsed.chave_acesso})
-        OR (${parsed.cnpj}::text IS NOT NULL AND cnpj = ${parsed.cnpj} AND numero = ${parsed.numero})
+     WHERE user_id = ${userId}
+       AND ((${parsed.chave_acesso}::text IS NOT NULL AND chave_acesso = ${parsed.chave_acesso})
+         OR (${parsed.cnpj}::text IS NOT NULL AND cnpj = ${parsed.cnpj} AND numero = ${parsed.numero}))
      LIMIT 1
   `) as Array<{ id: number }>;
   if (existingRows[0]) {
@@ -275,10 +335,10 @@ export async function upsertNota(parsed: ParsedNota): Promise<UpsertResult> {
   const result = (await sql()`
     WITH new_nota AS (
       INSERT INTO notas
-        (numero, serie, data_emissao, emitente, cnpj, valor_total,
+        (user_id, numero, serie, data_emissao, emitente, cnpj, valor_total,
          chave_acesso, creditos, situacao_credito, fonte)
       VALUES
-        (${parsed.numero}, ${parsed.serie}, ${parsed.data_emissao}, ${parsed.emitente},
+        (${userId}, ${parsed.numero}, ${parsed.serie}, ${parsed.data_emissao}, ${parsed.emitente},
          ${parsed.cnpj}, ${parsed.valor_total}, ${parsed.chave_acesso},
          ${parsed.creditos ?? 0}, ${parsed.situacao_credito ?? null}, ${parsed.fonte})
       RETURNING id
@@ -304,12 +364,18 @@ export async function upsertNota(parsed: ParsedNota): Promise<UpsertResult> {
 
 export type NotaWithItens = NotaRow & { itens: ItemRow[] };
 
-export async function listNotas(): Promise<NotaWithItens[]> {
+export async function listNotas(userId: number): Promise<NotaWithItens[]> {
   await ready();
   const notas = (await sql()`
-    SELECT * FROM notas ORDER BY data_emissao DESC, id DESC
+    SELECT * FROM notas
+     WHERE user_id = ${userId}
+     ORDER BY data_emissao DESC, id DESC
   `) as NotaRow[];
-  const itens = (await sql()`SELECT * FROM itens`) as ItemRow[];
+  const itens = (await sql()`
+    SELECT i.* FROM itens i
+      JOIN notas n ON n.id = i.nota_id
+     WHERE n.user_id = ${userId}
+  `) as ItemRow[];
   const byNota = new Map<number, ItemRow[]>();
   for (const it of itens) {
     const nid = Number(it.nota_id);
@@ -324,7 +390,7 @@ export async function listNotas(): Promise<NotaWithItens[]> {
   }));
 }
 
-export async function pickLastThreeNotasWithItems(): Promise<{
+export async function pickLastThreeNotasWithItems(userId: number): Promise<{
   notas: Array<{ numero: string; emitente: string; data: string }>;
   produtos: string[];
 }> {
@@ -332,7 +398,8 @@ export async function pickLastThreeNotasWithItems(): Promise<{
   const notas = (await sql()`
     SELECT n.id, n.numero, n.emitente, n.data_emissao
       FROM notas n
-      WHERE EXISTS (SELECT 1 FROM itens i WHERE i.nota_id = n.id)
+      WHERE n.user_id = ${userId}
+        AND EXISTS (SELECT 1 FROM itens i WHERE i.nota_id = n.id)
       ORDER BY n.created_at DESC, n.id DESC
       LIMIT 3
   `) as Array<{ id: number; numero: string; emitente: string; data_emissao: string }>;
@@ -359,7 +426,7 @@ export type ListaCompraItem = {
   produtos: string[];
 };
 
-export async function getListaCompras(): Promise<ListaCompraItem[]> {
+export async function getListaCompras(userId: number): Promise<ListaCompraItem[]> {
   await ready();
   const { categorizarPorDicionario, categorizarLote } = await import("./categorizar");
 
@@ -371,7 +438,7 @@ export async function getListaCompras(): Promise<ListaCompraItem[]> {
       n.data_emissao
     FROM itens i
     JOIN notas n ON n.id = i.nota_id
-    WHERE TRIM(i.produto) <> ''
+    WHERE n.user_id = ${userId} AND TRIM(i.produto) <> ''
   `) as Array<{ produto: string; nota_id: number; vu: number; data_emissao: string }>;
 
   if (itensRows.length === 0) return [];
@@ -490,13 +557,13 @@ function parseDataEmissao(d: string): Date | null {
   return null;
 }
 
-export async function getSeriesPrecos(): Promise<SeriePrecoProduto[]> {
+export async function getSeriesPrecos(userId: number): Promise<SeriePrecoProduto[]> {
   await ready();
   const rows = (await sql()`
     SELECT i.produto, i.codigo, i.un, i.vu, n.data_emissao
       FROM itens i
       JOIN notas n ON n.id = i.nota_id
-     WHERE i.vu > 0 AND TRIM(i.produto) <> ''
+     WHERE n.user_id = ${userId} AND i.vu > 0 AND TRIM(i.produto) <> ''
   `) as Array<{ produto: string; codigo: string | null; un: string | null; vu: number; data_emissao: string }>;
   if (rows.length === 0) return [];
 
@@ -604,13 +671,13 @@ export type DashboardData = {
   inflacao: InflacaoCesta | null;
 };
 
-export async function getDashboardData(): Promise<DashboardData> {
+export async function getDashboardData(userId: number): Promise<DashboardData> {
   await ready();
   const { categorizarPorDicionario } = await import("./categorizar");
 
   const [notasRows, itensRows, categoriasCache] = (await Promise.all([
-    sql()`SELECT * FROM notas ORDER BY data_emissao DESC, id DESC`,
-    sql()`SELECT * FROM itens`,
+    sql()`SELECT * FROM notas WHERE user_id = ${userId} ORDER BY data_emissao DESC, id DESC`,
+    sql()`SELECT i.* FROM itens i JOIN notas n ON n.id = i.nota_id WHERE n.user_id = ${userId}`,
     sql()`SELECT produto, categoria FROM produto_categorias`,
   ])) as [NotaRow[], ItemRow[], Array<{ produto: string; categoria: string }>];
 
@@ -697,14 +764,15 @@ export async function getDashboardData(): Promise<DashboardData> {
 
 export type GastoCategoria = { categoria: string; total: number; n_itens: number };
 
-export async function getGastoPorCategoria(): Promise<GastoCategoria[]> {
+export async function getGastoPorCategoria(userId: number): Promise<GastoCategoria[]> {
   await ready();
   const { categorizarPorDicionario } = await import("./categorizar");
 
   const rows = (await sql()`
     SELECT i.produto, i.vt
       FROM itens i
-     WHERE TRIM(i.produto) <> ''
+      JOIN notas n ON n.id = i.nota_id
+     WHERE n.user_id = ${userId} AND TRIM(i.produto) <> ''
   `) as Array<{ produto: string; vt: number }>;
   if (rows.length === 0) return [];
 
@@ -737,8 +805,8 @@ export type InflacaoCesta = {
   n_produtos: number;
 };
 
-export async function getInflacaoCesta(): Promise<InflacaoCesta | null> {
-  const series = await getSeriesPrecos();
+export async function getInflacaoCesta(userId: number): Promise<InflacaoCesta | null> {
+  const series = await getSeriesPrecos(userId);
   const recorrentes = series.filter((s) => s.mensal.length >= 2);
   if (recorrentes.length === 0) return null;
 
