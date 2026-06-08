@@ -28,7 +28,7 @@ export default async function RootLayout({
 
   async function logout() {
     "use server";
-    await signOut({ redirectTo: "/login" });
+    await signOut({ redirectTo: "/" });
   }
 
   return (

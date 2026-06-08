@@ -11,7 +11,7 @@ export default async function LoginPage({
 
   async function login() {
     "use server";
-    await signIn("google", { redirectTo: from || "/" });
+    await signIn("google", { redirectTo: from || "/dashboard" });
   }
 
   return (
