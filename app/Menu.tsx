@@ -17,6 +17,7 @@ const C = {
 type Item = { href: string; label: string; sub: string };
 const ITEMS: Item[] = [
   { href: "/", label: "Dashboard", sub: "Painel principal de notas e gastos" },
+  { href: "/lista-compras", label: "Lista de compras", sub: "Itens que você compra com frequência" },
   { href: "/receitas", label: "Receitas", sub: "O que cozinhar com suas últimas compras" },
   { href: "/contato", label: "Contato", sub: "Falar com a autora do projeto" },
 ];

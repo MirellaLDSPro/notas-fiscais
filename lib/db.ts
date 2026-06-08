@@ -341,3 +341,60 @@ export async function pickLastThreeNotasWithItems(): Promise<{
     produtos: produtos.map((p) => p.produto),
   };
 }
+
+export type ListaCompraItem = {
+  produto: string;
+  vezes: number;
+  ultima_compra: string;
+  total_qt: number;
+  preco_medio: number;
+  un: string | null;
+};
+
+export async function getListaCompras(): Promise<ListaCompraItem[]> {
+  await ready();
+  const rows = (await sql()`
+    WITH base AS (
+      SELECT
+        UPPER(TRIM(i.produto)) AS produto,
+        i.nota_id,
+        i.qt,
+        i.vu,
+        i.un,
+        n.data_emissao
+      FROM itens i
+      JOIN notas n ON n.id = i.nota_id
+      WHERE TRIM(i.produto) <> ''
+    )
+    SELECT
+      produto,
+      COUNT(DISTINCT nota_id)::int AS vezes,
+      MAX(data_emissao) AS ultima_compra,
+      SUM(qt)::float AS total_qt,
+      AVG(vu)::float AS preco_medio,
+      (
+        SELECT un FROM base b2
+         WHERE b2.produto = base.produto AND un IS NOT NULL
+         GROUP BY un ORDER BY COUNT(*) DESC, un LIMIT 1
+      ) AS un
+    FROM base
+    GROUP BY produto
+    HAVING COUNT(DISTINCT nota_id) >= 3
+    ORDER BY vezes DESC, ultima_compra DESC, produto ASC
+  `) as Array<{
+    produto: string;
+    vezes: number;
+    ultima_compra: string;
+    total_qt: number;
+    preco_medio: number;
+    un: string | null;
+  }>;
+  return rows.map((r) => ({
+    produto: r.produto,
+    vezes: Number(r.vezes),
+    ultima_compra: r.ultima_compra,
+    total_qt: Number(r.total_qt),
+    preco_medio: Number(r.preco_medio),
+    un: r.un,
+  }));
+}
