@@ -82,10 +82,10 @@ receitas com IA a partir dos produtos comprados.
 
 ### Variáveis opcionais
 - `ANTHROPIC_API_KEY` — habilita `/receitas` e categorização IA da lista de compras.
+- `AUTH_ALLOWED_EMAILS` — lista de emails (separados por vírgula) com acesso ao painel `/admin`. Não restringe login: cadastro segue aberto, apenas o link "Admin" no menu e a rota `/admin` ficam gated. Sem a variável, ninguém é admin.
 
 ### Variáveis que **não** devem ser setadas
 - `AUTH_URL` / `NEXTAUTH_URL` — sem elas, Auth.js v5 detecta a origem via `x-forwarded-host` e cada domínio (custom + previews `.vercel.app`) funciona com seu próprio callback. Setar força um único callback e quebra o login nos outros domínios.
-- `AUTH_ALLOWED_EMAILS` — allowlist removida quando o cadastro virou aberto. Auth.js ignora.
 
 ## 5. Modelo de dados
 

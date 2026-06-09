@@ -42,6 +42,30 @@ export function userIdFromSession(
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+function adminAllowlist(): Set<string> {
+  const raw = process.env.AUTH_ALLOWED_EMAILS ?? "";
+  return new Set(
+    raw
+      .split(",")
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
+
+export function isAdminEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return adminAllowlist().has(email.toLowerCase());
+}
+
+export async function requireAdmin(): Promise<{ userId: number; email: string }> {
+  const session = await auth();
+  const userId = userIdFromSession(session);
+  const email = session?.user?.email ?? null;
+  if (!userId) redirect("/login");
+  if (!isAdminEmail(email)) redirect("/dashboard");
+  return { userId, email: email! };
+}
+
 export type ViewingAs = {
   ownerUserId: number;
   email: string;

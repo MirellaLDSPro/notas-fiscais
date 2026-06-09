@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Menu from "./Menu";
-import { auth, signOut } from "@/auth";
+import { auth, isAdminEmail, signOut } from "@/auth";
 import { listOwnersSharingWith } from "@/lib/db";
 
 const geistSans = Geist({
@@ -29,6 +29,7 @@ export default async function RootLayout({
   const sharedWithMe = session?.user?.email
     ? await listOwnersSharingWith(session.user.email)
     : [];
+  const isAdmin = isAdminEmail(session?.user?.email);
 
   async function logout() {
     "use server";
@@ -46,6 +47,7 @@ export default async function RootLayout({
             userEmail={session.user.email ?? null}
             logoutAction={logout}
             sharedWithMe={sharedWithMe}
+            isAdmin={isAdmin}
           />
         )}
         {children}

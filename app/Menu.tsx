@@ -15,7 +15,7 @@ const C = {
   accent2: "#5fb89a",
 };
 
-type Item = { href: string; label: string; sub: string; ownerAware?: boolean };
+type Item = { href: string; label: string; sub: string; ownerAware?: boolean; adminOnly?: boolean };
 const ITEMS: Item[] = [
   { href: "/dashboard", label: "Dashboard", sub: "Painel principal de notas e gastos", ownerAware: true },
   { href: "/lista-compras", label: "Lista de compras", sub: "Itens que você compra com frequência", ownerAware: true },
@@ -23,6 +23,7 @@ const ITEMS: Item[] = [
   { href: "/receitas", label: "Receitas", sub: "O que cozinhar com suas últimas compras" },
   { href: "/compartilhar", label: "Compartilhar relatório", sub: "Dar acesso de leitura a outro email" },
   { href: "/contato", label: "Contato", sub: "Falar com a autora do projeto" },
+  { href: "/admin", label: "Admin", sub: "Visão global da base — só admins", adminOnly: true },
 ];
 
 type SharedOwner = {
@@ -35,9 +36,10 @@ type MenuProps = {
   userEmail: string | null;
   logoutAction: () => Promise<void>;
   sharedWithMe?: SharedOwner[];
+  isAdmin?: boolean;
 };
 
-export default function Menu({ userEmail, logoutAction, sharedWithMe = [] }: MenuProps) {
+export default function Menu({ userEmail, logoutAction, sharedWithMe = [], isAdmin = false }: MenuProps) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
@@ -236,7 +238,12 @@ export default function Menu({ userEmail, logoutAction, sharedWithMe = [] }: Men
               </Link>
             )}
 
-            {ITEMS.filter((it) => !(viewingOwner && it.href === "/receitas")).map((it) => {
+            {ITEMS.filter((it) => {
+              if (it.adminOnly && !isAdmin) return false;
+              if (viewingOwner && it.href === "/receitas") return false;
+              if (viewingOwner && it.adminOnly) return false;
+              return true;
+            }).map((it) => {
               const href =
                 viewingOwner && it.ownerAware
                   ? `${it.href}?owner=${viewingOwner.ownerUserId}`

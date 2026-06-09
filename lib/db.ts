@@ -952,3 +952,148 @@ function dataKey(d: string): string {
   }
   return d;
 }
+
+export type AdminStats = {
+  totalUsers: number;
+  totalNotas: number;
+  totalItens: number;
+  gastoTotal: number;
+  totalEstabelecimentos: number;
+  estabelecimentosSemGeo: number;
+};
+
+export async function getAdminStats(): Promise<AdminStats> {
+  await ready();
+  const rows = (await sql()`
+    SELECT
+      (SELECT COUNT(*) FROM users)::bigint AS users,
+      (SELECT COUNT(*) FROM notas)::bigint AS notas,
+      (SELECT COUNT(*) FROM itens)::bigint AS itens,
+      (SELECT COALESCE(SUM(valor_total), 0) FROM notas)::double precision AS gasto,
+      (SELECT COUNT(*) FROM estabelecimentos)::bigint AS estab,
+      (SELECT COUNT(*) FROM estabelecimentos WHERE latitude IS NULL OR longitude IS NULL)::bigint AS estab_sem_geo
+  `) as Array<{
+    users: number;
+    notas: number;
+    itens: number;
+    gasto: number;
+    estab: number;
+    estab_sem_geo: number;
+  }>;
+  const r = rows[0];
+  return {
+    totalUsers: Number(r.users),
+    totalNotas: Number(r.notas),
+    totalItens: Number(r.itens),
+    gastoTotal: Number(r.gasto),
+    totalEstabelecimentos: Number(r.estab),
+    estabelecimentosSemGeo: Number(r.estab_sem_geo),
+  };
+}
+
+export type AdminUserRow = {
+  id: number;
+  email: string;
+  name: string | null;
+  createdAt: string;
+  qtdNotas: number;
+  gastoTotal: number;
+  ultimaNota: string | null;
+};
+
+export async function listAllUsers(): Promise<AdminUserRow[]> {
+  await ready();
+  const rows = (await sql()`
+    SELECT
+      u.id,
+      u.email,
+      u.name,
+      u.created_at,
+      COUNT(n.id)::bigint AS qtd_notas,
+      COALESCE(SUM(n.valor_total), 0)::double precision AS gasto_total,
+      MAX(n.created_at) AS ultima_nota
+    FROM users u
+    LEFT JOIN notas n ON n.user_id = u.id
+    GROUP BY u.id, u.email, u.name, u.created_at
+    ORDER BY qtd_notas DESC, u.created_at DESC
+  `) as Array<{
+    id: number;
+    email: string;
+    name: string | null;
+    created_at: string;
+    qtd_notas: number;
+    gasto_total: number;
+    ultima_nota: string | null;
+  }>;
+  return rows.map((r) => ({
+    id: Number(r.id),
+    email: r.email,
+    name: r.name,
+    createdAt: r.created_at,
+    qtdNotas: Number(r.qtd_notas),
+    gastoTotal: Number(r.gasto_total),
+    ultimaNota: r.ultima_nota,
+  }));
+}
+
+export type AdminActivityRow = {
+  notaId: number;
+  userEmail: string;
+  numero: string;
+  emitente: string;
+  valorTotal: number;
+  fonte: string;
+  createdAt: string;
+};
+
+export async function listRecentActivity(limit = 50): Promise<AdminActivityRow[]> {
+  await ready();
+  const safeLimit = Math.max(1, Math.min(200, Math.trunc(limit)));
+  const rows = (await sql()`
+    SELECT
+      n.id,
+      u.email,
+      n.numero,
+      n.emitente,
+      n.valor_total,
+      n.fonte,
+      n.created_at
+    FROM notas n
+    JOIN users u ON u.id = n.user_id
+    ORDER BY n.created_at DESC, n.id DESC
+    LIMIT ${safeLimit}
+  `) as Array<{
+    id: number;
+    email: string;
+    numero: string;
+    emitente: string;
+    valor_total: number;
+    fonte: string;
+    created_at: string;
+  }>;
+  return rows.map((r) => ({
+    notaId: Number(r.id),
+    userEmail: r.email,
+    numero: r.numero,
+    emitente: r.emitente,
+    valorTotal: Number(r.valor_total),
+    fonte: r.fonte,
+    createdAt: r.created_at,
+  }));
+}
+
+export async function deleteUserNotas(userId: number): Promise<number> {
+  await ready();
+  const rows = (await sql()`
+    WITH del AS (
+      DELETE FROM notas WHERE user_id = ${userId} RETURNING id
+    )
+    SELECT COUNT(*)::bigint AS n FROM del
+  `) as Array<{ n: number }>;
+  return Number(rows[0]?.n ?? 0);
+}
+
+export async function deleteUser(userId: number): Promise<void> {
+  await ready();
+  await sql()`DELETE FROM users WHERE id = ${userId}`;
+}
