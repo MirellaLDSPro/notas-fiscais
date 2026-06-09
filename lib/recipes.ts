@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createHash } from "node:crypto";
+import { Redis } from "@upstash/redis";
 import { pickLastThreeNotasWithItems } from "./db";
 
 export type Receita = {
@@ -75,8 +76,50 @@ const SCHEMA = {
 declare global {
   // eslint-disable-next-line no-var
   var __recipesCache: Map<string, ReceitasPayload> | undefined;
+  // eslint-disable-next-line no-var
+  var __recipesRedis: Redis | null | undefined;
 }
-const cache = (globalThis.__recipesCache ??= new Map<string, ReceitasPayload>());
+const memCache = (globalThis.__recipesCache ??= new Map<string, ReceitasPayload>());
+
+const CACHE_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 dias
+
+function getRedis(): Redis | null {
+  if (globalThis.__recipesRedis !== undefined) return globalThis.__recipesRedis;
+  if (
+    process.env.UPSTASH_REDIS_REST_URL &&
+    process.env.UPSTASH_REDIS_REST_TOKEN
+  ) {
+    globalThis.__recipesRedis = Redis.fromEnv();
+  } else {
+    globalThis.__recipesRedis = null;
+  }
+  return globalThis.__recipesRedis;
+}
+
+async function cacheGet(key: string): Promise<ReceitasPayload | null> {
+  const r = getRedis();
+  if (r) {
+    try {
+      const v = await r.get<ReceitasPayload>(`recipes:${key}`);
+      return v ?? null;
+    } catch (err) {
+      console.error("[recipes] redis get falhou, caindo no cache em memória:", err);
+    }
+  }
+  return memCache.get(key) ?? null;
+}
+
+async function cacheSet(key: string, val: ReceitasPayload): Promise<void> {
+  memCache.set(key, val);
+  const r = getRedis();
+  if (r) {
+    try {
+      await r.set(`recipes:${key}`, val, { ex: CACHE_TTL_SECONDS });
+    } catch (err) {
+      console.error("[recipes] redis set falhou (cache em memória ainda gravado):", err);
+    }
+  }
+}
 
 export type RecipesError =
   | { kind: "no_key" }
@@ -100,8 +143,9 @@ export async function gerarReceitas(
   }
 
   const key = createHash("sha256").update(`${userId}:${produtos.join("\n")}`).digest("hex");
-  if (!opts.force && cache.has(key)) {
-    return { ok: true, payload: cache.get(key)!, cached: true };
+  if (!opts.force) {
+    const cached = await cacheGet(key);
+    if (cached) return { ok: true, payload: cached, cached: true };
   }
 
   const client = new Anthropic({ apiKey });
@@ -140,7 +184,7 @@ export async function gerarReceitas(
       receitas: parsed.receitas,
       generated_at: new Date().toISOString(),
     };
-    cache.set(key, payload);
+    await cacheSet(key, payload);
     return { ok: true, payload, cached: false };
   } catch (err) {
     if (err instanceof Anthropic.AuthenticationError) {
