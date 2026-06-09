@@ -89,13 +89,29 @@ export default function ContatoPage() {
 
         <div style={card}>
           <h3 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 8px" }}>
-            Sobre o projeto
+            O que é o Onde Foi Seu Dinheiro
           </h3>
-          <p style={{ fontSize: 13, color: C.muted, margin: "0 0 8px", lineHeight: 1.5 }}>
-            Dashboard pessoal para consolidar gastos a partir de cupons fiscais (NFC-e),
-            planilhas e a consulta da Nota Fiscal Paulista. Os dados ficam num SQLite local
-            — nada sobe para serviços externos exceto os produtos enviados à API da
-            Anthropic na hora de gerar receitas.
+          <p style={{ fontSize: 13, color: C.muted, margin: "0 0 12px", lineHeight: 1.5 }}>
+            Toda vez que você compra no mercado, recebe um cupom fiscal. Nosso site pega
+            esses cupons e mostra, de forma fácil de entender, para onde está indo o seu
+            dinheiro.
+          </p>
+          <p style={{ fontSize: 13, color: C.muted, margin: "0 0 12px", lineHeight: 1.5 }}>
+            É simples assim: você envia o PDF do cupom (ou aponta a câmera para o QR code
+            dele), e o site lê tudo sozinho — os produtos, os preços e a data. Você não
+            precisa digitar nada.
+          </p>
+          <p style={{ fontSize: 13, color: C.muted, margin: "0 0 12px", lineHeight: 1.5 }}>
+            A partir daí, ele monta gráficos que mostram quanto você gastou por mês, quais
+            produtos pesam mais no bolso e como o preço de cada item muda com o tempo.
+            Também descobre em que época do ano as coisas costumam ficar mais baratas,
+            monta uma lista de compras com o que você compra sempre e ainda sugere
+            receitas com os produtos das suas últimas notas.
+          </p>
+          <p style={{ fontSize: 13, color: C.muted, margin: 0, lineHeight: 1.5 }}>
+            Para entrar, basta usar sua conta do Google. Seus dados são só seus — ninguém
+            mais vê suas compras, a não ser que você escolha compartilhar seu relatório
+            com alguém.
           </p>
         </div>
       </div>
