@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { auth, isAdminEmail, requireAdmin, userIdFromSession } from "@/auth";
@@ -168,6 +169,28 @@ export default async function AdminPage({
             hint="CNPJs sem lat/long — falha no enrich"
             warn={stats.estabelecimentosSemGeo > 0}
           />
+          <Link
+            href="/admin/erros"
+            style={{ textDecoration: "none", color: "inherit" }}
+          >
+            <StatCard
+              label="Erros de upload"
+              value={fmtNum.format(stats.totalErros)}
+              hint="Notas que falharam o parse — clique para ver"
+              warn={stats.totalErros > 0}
+            />
+          </Link>
+          <Link
+            href="/admin/erros#auto-parsed"
+            style={{ textDecoration: "none", color: "inherit" }}
+          >
+            <StatCard
+              label="Parseadas pelo Claude"
+              value={fmtNum.format(stats.totalParsedByClaude)}
+              hint="Notas extraídas por IA — revise os dígitos"
+              warn={stats.totalParsedByClaude > 0}
+            />
+          </Link>
         </div>
 
         <div style={sectionTitle}>Usuários ({users.length})</div>

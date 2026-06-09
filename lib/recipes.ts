@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createHash } from "node:crypto";
+import { createClient, type RedisClientType } from "redis";
 import { pickLastThreeNotasWithItems } from "./db";
 
 export type Receita = {
@@ -75,8 +76,58 @@ const SCHEMA = {
 declare global {
   // eslint-disable-next-line no-var
   var __recipesCache: Map<string, ReceitasPayload> | undefined;
+  // eslint-disable-next-line no-var
+  var __recipesRedisPromise: Promise<RedisClientType | null> | undefined;
 }
-const cache = (globalThis.__recipesCache ??= new Map<string, ReceitasPayload>());
+const memCache = (globalThis.__recipesCache ??= new Map<string, ReceitasPayload>());
+
+const CACHE_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 dias
+
+async function getRedis(): Promise<RedisClientType | null> {
+  if (globalThis.__recipesRedisPromise) return globalThis.__recipesRedisPromise;
+  const url = process.env.REDIS_URL;
+  if (!url) {
+    globalThis.__recipesRedisPromise = Promise.resolve(null);
+    return globalThis.__recipesRedisPromise;
+  }
+  globalThis.__recipesRedisPromise = (async () => {
+    try {
+      const client: RedisClientType = createClient({ url });
+      client.on("error", (err) => console.error("[recipes] redis client error:", err));
+      await client.connect();
+      return client;
+    } catch (err) {
+      console.error("[recipes] redis connect falhou:", err);
+      return null;
+    }
+  })();
+  return globalThis.__recipesRedisPromise;
+}
+
+async function cacheGet(key: string): Promise<ReceitasPayload | null> {
+  const r = await getRedis();
+  if (r) {
+    try {
+      const raw = await r.get(`recipes:${key}`);
+      if (raw) return JSON.parse(raw) as ReceitasPayload;
+    } catch (err) {
+      console.error("[recipes] redis get falhou, caindo no cache em memória:", err);
+    }
+  }
+  return memCache.get(key) ?? null;
+}
+
+async function cacheSet(key: string, val: ReceitasPayload): Promise<void> {
+  memCache.set(key, val);
+  const r = await getRedis();
+  if (r) {
+    try {
+      await r.set(`recipes:${key}`, JSON.stringify(val), { EX: CACHE_TTL_SECONDS });
+    } catch (err) {
+      console.error("[recipes] redis set falhou (cache em memória ainda gravado):", err);
+    }
+  }
+}
 
 export type RecipesError =
   | { kind: "no_key" }
@@ -100,8 +151,9 @@ export async function gerarReceitas(
   }
 
   const key = createHash("sha256").update(`${userId}:${produtos.join("\n")}`).digest("hex");
-  if (!opts.force && cache.has(key)) {
-    return { ok: true, payload: cache.get(key)!, cached: true };
+  if (!opts.force) {
+    const cached = await cacheGet(key);
+    if (cached) return { ok: true, payload: cached, cached: true };
   }
 
   const client = new Anthropic({ apiKey });
@@ -122,7 +174,6 @@ export async function gerarReceitas(
       output_config: {
         format: {
           type: "json_schema",
-          name: "receitas_brasileiras",
           schema: SCHEMA,
         },
       },
@@ -141,7 +192,7 @@ export async function gerarReceitas(
       receitas: parsed.receitas,
       generated_at: new Date().toISOString(),
     };
-    cache.set(key, payload);
+    await cacheSet(key, payload);
     return { ok: true, payload, cached: false };
   } catch (err) {
     if (err instanceof Anthropic.AuthenticationError) {

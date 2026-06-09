@@ -19,6 +19,8 @@ type UploadResult = {
   fonte?: string;
   notas?: Summary[];
   error?: string;
+  numero?: string | null;
+  chave_acesso?: string | null;
 };
 
 const C = {
@@ -113,7 +115,7 @@ export default function UploadDropzone() {
         <input
           ref={inputRef}
           type="file"
-          accept="application/pdf,.pdf,.xlsx,.xls,.csv"
+          accept="application/pdf,.pdf,.mht,.mhtml,multipart/related,message/rfc822,.xlsx,.xls,.csv"
           multiple
           hidden
           disabled={busy}
@@ -123,7 +125,7 @@ export default function UploadDropzone() {
           {busy ? "Processando…" : "Solte aqui ou clique para selecionar"}
         </div>
         <div style={{ fontSize: 11, color: C.muted, fontFamily: "monospace" }}>
-          PDF (NFC-e) · XLSX (planilha) · CSV (NFP)
+          PDF · MHT (página salva) · XLSX · CSV
         </div>
       </label>
 
@@ -180,6 +182,14 @@ export default function UploadDropzone() {
                   </div>
                 )}
                 {r.error && <div style={{ color: C.warn, marginTop: 4 }}>{r.error}</div>}
+                {r.status === "error" && (r.numero || r.chave_acesso) && (
+                  <div style={{ color: C.muted, marginTop: 4, fontFamily: "monospace", fontSize: 11 }}>
+                    {r.numero && <div>Nº identificado: #{r.numero}</div>}
+                    {r.chave_acesso && (
+                      <div style={{ wordBreak: "break-all" }}>Chave: {r.chave_acesso}</div>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}

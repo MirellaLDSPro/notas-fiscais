@@ -36,6 +36,8 @@ receitas com IA a partir dos produtos comprados.
 | RF16 | O recebedor de uma grant deve ver os relatórios disponíveis num combobox com busca no fim do menu. Selecionar abre `/dashboard`, `/precos` ou `/lista-compras` com `?owner=<id>`. |
 | RF17 | Em modo de visualização compartilhada (`?owner=<id>`), o servidor deve verificar a grant via `canViewAsOwner(viewerEmail, ownerId)` antes de servir os dados do dono; falha redireciona para a rota base. Mutations (upload) ficam bloqueadas no client (escondidas) e devem ser bloqueadas no server caso a rota receba dados de escrita. |
 | RF18 | A página `/receitas` não participa do compartilhamento — fica oculta do menu em modo viewing. |
+| RF19 | Quando o parser regex de NFC-e em PDF falhar, o sistema deve tentar um **fallback automático via Claude Haiku 4.5** (parse completo: emitente, CNPJ, data, valor, itens, chave). Sucesso = nota entra na base com `fonte='CLAUDE'`. Falha = registra em `notas_erros` com os dados parciais extraídos pela IA. |
+| RF20 | O painel `/admin/erros` deve listar, para administradores, (a) notas parseadas por IA — para revisão de dígitos — e (b) falhas totais com dados parciais. Erros são deduplicados por usuário (chave de acesso, senão SHA-256 do arquivo). |
 
 ## 3. Requisitos não funcionais
 
@@ -72,7 +74,7 @@ receitas com IA a partir dos produtos comprados.
 | Serviço | Uso | Falha → comportamento |
 | --- | --- | --- |
 | **brasilapi.com.br** | enriquecer endereços por CNPJ | item sem endereço, sync log marca erro |
-| **api.anthropic.com** | gerar receitas + categorizar produtos | `/receitas` retorna placeholder; lista de compras usa fallback (dicionário + 1ª palavra) |
+| **api.anthropic.com** | gerar receitas, categorizar produtos e parsear NFC-e que o regex não consegue ler | `/receitas` retorna placeholder; lista de compras usa fallback (dicionário + 1ª palavra); PDFs ilegíveis viram registro em `/admin/erros` em vez de inserir nota |
 | **accounts.google.com** | OAuth de login | usuário não consegue logar — único caminho de auth no momento |
 
 ### Variáveis de ambiente obrigatórias
@@ -81,7 +83,7 @@ receitas com IA a partir dos produtos comprados.
 - `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` — OAuth client do Google. Cada domínio que serve o app precisa estar nas Authorized redirect URIs do Google.
 
 ### Variáveis opcionais
-- `ANTHROPIC_API_KEY` — habilita `/receitas` e categorização IA da lista de compras.
+- `ANTHROPIC_API_KEY` — habilita `/receitas`, categorização IA da lista de compras e o **fallback de parse de NFC-e em PDF** (`lib/ocrNfce.ts → parseNfceViaClaude`). Sem a chave, PDFs que o regex não decifra viram registro silencioso em `notas_erros`.
 - `AUTH_ALLOWED_EMAILS` — lista de emails (separados por vírgula) com acesso ao painel `/admin`. Não restringe login: cadastro segue aberto, apenas o link "Admin" no menu e a rota `/admin` ficam gated. Sem a variável, ninguém é admin.
 
 ### Variáveis que **não** devem ser setadas
@@ -92,7 +94,8 @@ receitas com IA a partir dos produtos comprados.
 ```
 users (id, email UNIQUE, name, created_at)
 notas (id, user_id FK → users, numero, serie, data_emissao, emitente, cnpj,
-       valor_total, chave_acesso, creditos, situacao_credito, fonte, created_at,
+       valor_total, chave_acesso, creditos, situacao_credito,
+       fonte ∈ {'PDF','XLSX','NFP','CLAUDE'}, created_at,
        UNIQUE (user_id, chave_acesso) WHERE chave_acesso IS NOT NULL,
        UNIQUE (user_id, cnpj, numero) WHERE cnpj IS NOT NULL)
 itens (id, nota_id FK → notas, produto, codigo, qt, un, vu, vt)
@@ -101,6 +104,10 @@ estabelecimentos (cnpj PK, razao_social, nome_fantasia, endereço completo,
 produto_categorias (produto PK, categoria, fonte, criado_em)
 report_shares (id, owner_user_id FK → users, shared_with_email, created_at,
                UNIQUE (owner_user_id, shared_with_email))
+notas_erros (id, user_id FK → users, nome_arquivo, erro,
+             numero, chave_acesso, file_sha256, dedup_key,
+             parsed_partial JSONB, created_at,
+             UNIQUE (user_id, dedup_key))
 ```
 
 - `notas` e `itens` são **per-user** (escopo via `user_id` em `notas`; `itens`
@@ -118,6 +125,11 @@ report_shares (id, owner_user_id FK → users, shared_with_email, created_at,
   compartilhar com alguém que ainda não logou. A resolução pra `user_id` é
   feita no momento da query (`canViewAsOwner` faz `WHERE shared_with_email =
   lower(viewerEmail)`).
+- `notas_erros` é **per-user** e armazena uploads que falharam o parse —
+  tanto regex quanto fallback Claude. Dedup por `(user_id, dedup_key)`, onde
+  `dedup_key = chave_acesso ?? file_sha256`. `parsed_partial` (JSONB) guarda
+  qualquer dado que o Claude conseguiu extrair (emitente, CNPJ, valor, etc.)
+  pra revisão administrativa em `/admin/erros`.
 
 ## 6. Restrições / fora de escopo
 
@@ -127,8 +139,11 @@ report_shares (id, owner_user_id FK → users, shared_with_email, created_at,
   workspace fica isolado, mas não há proteção contra criação massiva de
   contas. Se isso virar problema, adicionar rate-limit no upload é a primeira
   defesa razoável.
-- **Sem painel administrativo.** Não há interface pra listar/gerenciar
-  usuários — uso direto do Neon SQL Editor.
+- **Painel administrativo restrito.** Existe `/admin` (KPIs globais, lista de
+  usuários, reset/excluir) e `/admin/erros` (uploads que falharam o parse +
+  notas parseadas por IA). Acesso só pra emails listados em
+  `AUTH_ALLOWED_EMAILS`. Operações além do que está exposto pelo painel
+  (consultas ad hoc, correções pontuais) continuam exigindo Neon SQL Editor.
 - **Compartilhamento é binário e por workspace inteiro.** Quem recebe acesso
   vê Dashboard + Lista de compras + Preços do owner. Permissionamento
   granular (esconder categorias específicas, esconder valores absolutos, dar
