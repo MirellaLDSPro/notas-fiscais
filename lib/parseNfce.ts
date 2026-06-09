@@ -39,6 +39,14 @@ export async function parseNfcePdf(buffer: Buffer): Promise<ParsedNota> {
     await parser.destroy();
   }
 
+  if (/Cupom Fiscal Eletrônico SAT|CUPOM FISCAL ELETRÔNICO\s*-\s*SAT/i.test(text)) {
+    return parseSatText(text);
+  }
+
+  return parseNfceText(text);
+}
+
+function parseNfceText(text: string): ParsedNota {
   const cnpjMatch = text.match(/CNPJ:\s*([\d./-]+)/);
   const cnpj = cnpjMatch?.[1] ?? null;
 
@@ -95,6 +103,98 @@ export async function parseNfcePdf(buffer: Buffer): Promise<ParsedNota> {
   return {
     numero,
     serie,
+    data_emissao: dataEmissao,
+    emitente,
+    cnpj,
+    chave_acesso: chaveAcesso,
+    valor_total: valorTotal,
+    fonte: "PDF",
+    itens,
+    endereco,
+  };
+}
+
+const SAT_ITEM_RE =
+  /^(\d{1,3})\s+([A-Z][A-Z0-9]+)\s+([\s\S]+?)\s+(\d+,\d{4})\s+([A-Z]+)(\d)\s+([\d.,]+)\s+\([\d.,]+\)\s+([\d.,]+)/gm;
+
+function parseSatEndereco(enderecoLine: string, bairroLine: string): EnderecoPdf | null {
+  const end = enderecoLine.match(/Endereço:\s*(.+?)(?:,\s*Nº\s*(\S+))?(?:\s*-\s*(.+))?$/);
+  const bai = bairroLine.match(
+    /Bairro:\s*(.+?)\s*(?:-\s*CEP:\s*\S+\s*)?-\s*(.+?)\s*-\s*([A-Z]{2})\s*$/
+  );
+  if (!end && !bai) return null;
+  const complemento = end?.[3]?.trim();
+  return {
+    logradouro: end?.[1]?.trim() || null,
+    numero: end?.[2]?.trim() || null,
+    complemento: complemento && complemento.toLowerCase() !== "nao informado" ? complemento : null,
+    bairro: bai?.[1]?.trim() || null,
+    municipio: bai?.[2]?.trim() || null,
+    uf: bai?.[3]?.trim() || null,
+  };
+}
+
+function parseSatText(text: string): ParsedNota {
+  const headerMatch = text.match(/Cupom Fiscal Eletrônico SAT\s*\n\s*(.+)/);
+  const emitente = headerMatch?.[1]?.trim() || "Emitente desconhecido";
+
+  const cnpjMatch = text.match(/CNPJ:\s*([\d./-]+)/);
+  const cnpj = cnpjMatch?.[1] ?? null;
+
+  const enderecoLine = text.match(/Endereço:.+$/m)?.[0] ?? "";
+  const bairroLine = text.match(/Bairro:.+$/m)?.[0] ?? "";
+  const endereco = enderecoLine || bairroLine ? parseSatEndereco(enderecoLine, bairroLine) : null;
+
+  const extratoMatch = text.match(/Extrato\s*Nº:\s*(\d+)/i);
+  if (!extratoMatch) {
+    throw new Error("Não foi possível identificar 'Extrato Nº' no cupom SAT.");
+  }
+  const numero = extratoMatch[1];
+
+  const dataMatch = text.match(/(\d{2}\/\d{2}\/\d{4})\s*-\s*\d{2}:\d{2}:\d{2}/);
+  if (!dataMatch) {
+    throw new Error("Não foi possível identificar a data de emissão do cupom SAT.");
+  }
+  const dataEmissao = dataMatch[1];
+
+  const chaveMatch = text.match(/((?:\d{4}\s+){10}\d{4})/);
+  const chaveAcesso = chaveMatch ? chaveMatch[1].replace(/\s+/g, "") : null;
+
+  const itens: ParsedNota["itens"] = [];
+  const matches = [...text.matchAll(SAT_ITEM_RE)];
+  for (const m of matches) {
+    const [full, , codigo, descRaw, qtRaw, un, , vuRaw, vtRaw] = m;
+    const produto = descRaw.replace(/\s+/g, " ").trim();
+    if (!produto) continue;
+    let vt = toNum(vtRaw);
+    const after = text.slice((m.index ?? 0) + full.length);
+    const descontoMatch = after.match(/^[\s\S]{0,80}?Desconto:\s*-?\s*([\d.,]+)/);
+    if (descontoMatch) {
+      const nextItem = after.search(/\n\s*\d{1,3}\s+[A-Z][A-Z0-9]+\s+/);
+      const descontoPos = after.indexOf(descontoMatch[0]);
+      if (nextItem === -1 || descontoPos < nextItem) {
+        vt = Math.round((vt - toNum(descontoMatch[1])) * 100) / 100;
+      }
+    }
+    itens.push({
+      produto,
+      codigo: codigo || null,
+      qt: toNum(qtRaw),
+      un: un || null,
+      vu: toNum(vuRaw),
+      vt,
+    });
+  }
+
+  if (itens.length === 0) {
+    throw new Error("Nenhum item identificado no cupom SAT.");
+  }
+
+  const valorTotal = Math.round(itens.reduce((s, i) => s + i.vt, 0) * 100) / 100;
+
+  return {
+    numero,
+    serie: null,
     data_emissao: dataEmissao,
     emitente,
     cnpj,
