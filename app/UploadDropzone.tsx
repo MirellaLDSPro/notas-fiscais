@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import QrScanButton from "./QrScanButton";
+import { TutorialVideoLink } from "./TutorialVideo";
 
 type Summary = {
   numero: string;
@@ -80,9 +81,12 @@ export default function UploadDropzone() {
       <h3 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 2px" }}>
         Enviar cupom fiscal (NFC-e)
       </h3>
-      <p style={{ fontSize: 12, color: C.muted, margin: "0 0 14px" }}>
+      <p style={{ fontSize: 12, color: C.muted, margin: "0 0 8px" }}>
         Arraste o PDF da NFC-e (o mesmo formato do site da Fazenda SP) ou clique para escolher.
       </p>
+      <div style={{ marginBottom: 14 }}>
+        <TutorialVideoLink />
+      </div>
 
       <label
         onDragOver={(e) => {

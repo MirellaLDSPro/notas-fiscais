@@ -13,6 +13,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import UploadDropzone from "./UploadDropzone";
+import { TutorialVideoInline } from "./TutorialVideo";
 import ViewingAsBanner from "./ViewingAsBanner";
 
 type ViewingAs = {
@@ -294,6 +295,7 @@ export default function Dashboard({
               ? "Este relatório ainda não tem cupons enviados."
               : "Os PDFs da NFC-e (igual aos da Fazenda SP) vão alimentar o painel."}
           </p>
+          {!readOnly && <TutorialVideoInline />}
           {!readOnly && <UploadDropzone />}
         </div>
       </div>
