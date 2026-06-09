@@ -67,29 +67,25 @@ export default async function ReceitasPage() {
         </p>
 
         {!result.ok && result.error.kind === "no_key" && (
-          <div style={{ ...card, borderLeft: `3px solid ${C.warn}` }}>
-            <h3 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 8px" }}>
-              Configure a API key da Anthropic
-            </h3>
-            <p style={{ fontSize: 13, color: C.muted, margin: "0 0 8px" }}>
-              As receitas são geradas pelo modelo <code style={{ fontFamily: "monospace", color: C.ink }}>claude-haiku-4-5</code>. Crie o arquivo <code style={{ fontFamily: "monospace", color: C.ink }}>.env.local</code> na pasta <code style={{ fontFamily: "monospace", color: C.ink }}>dashboard-app/</code> com:
-            </p>
-            <pre
+          <div style={{ ...card, borderLeft: `3px solid ${C.accent}`, textAlign: "center", padding: 28 }}>
+            <div
               style={{
-                background: C.panel2,
-                border: `1px solid ${C.line}`,
-                borderRadius: 8,
-                padding: 12,
-                fontSize: 12,
                 fontFamily: "monospace",
-                overflow: "auto",
-                margin: 0,
+                fontSize: 10,
+                letterSpacing: ".2em",
+                textTransform: "uppercase",
+                color: C.accent,
+                marginBottom: 10,
               }}
             >
-              ANTHROPIC_API_KEY=sk-ant-...
-            </pre>
-            <p style={{ fontSize: 12, color: C.muted, margin: "10px 0 0" }}>
-              Reinicie o dev server depois de salvar.
+              Em construção
+            </div>
+            <h3 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 8px" }}>
+              Essa feature ainda está no forno
+            </h3>
+            <p style={{ fontSize: 13, color: C.muted, margin: 0, lineHeight: 1.5 }}>
+              Estamos ajustando os últimos detalhes para sugerir receitas com base nas suas compras.
+              Volte em breve!
             </p>
           </div>
         )}
