@@ -4,6 +4,7 @@ import "./globals.css";
 import Menu from "./Menu";
 import { auth, isAdminEmail, signOut } from "@/auth";
 import { listOwnersSharingWith } from "@/lib/db";
+import { getFeatureFlags } from "@/lib/featureFlags";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -30,6 +31,7 @@ export default async function RootLayout({
     ? await listOwnersSharingWith(session.user.email)
     : [];
   const isAdmin = isAdminEmail(session?.user?.email);
+  const flags = getFeatureFlags(session?.user?.email);
 
   async function logout() {
     "use server";
@@ -48,6 +50,7 @@ export default async function RootLayout({
             logoutAction={logout}
             sharedWithMe={sharedWithMe}
             isAdmin={isAdmin}
+            flags={flags}
           />
         )}
         {children}

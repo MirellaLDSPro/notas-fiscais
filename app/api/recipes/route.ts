@@ -1,14 +1,19 @@
 import { NextResponse } from "next/server";
 import { auth, userIdFromSession } from "@/auth";
 import { gerarReceitas } from "@/lib/recipes";
+import { isFeatureEnabled } from "@/lib/featureFlags";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const userId = userIdFromSession(await auth());
+  const session = await auth();
+  const userId = userIdFromSession(session);
   if (!userId) {
     return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
+  }
+  if (!isFeatureEnabled("receitas", session?.user?.email)) {
+    return NextResponse.json({ error: "Feature indisponível." }, { status: 403 });
   }
   const force = new URL(request.url).searchParams.get("force") === "1";
   const result = await gerarReceitas(userId, { force });

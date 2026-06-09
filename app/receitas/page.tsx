@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth, userIdFromSession } from "@/auth";
 import { gerarReceitas } from "@/lib/recipes";
+import { isFeatureEnabled } from "@/lib/featureFlags";
 import RefreshButton from "./RefreshButton";
 
 export const dynamic = "force-dynamic";
@@ -35,8 +36,10 @@ const sectionTitle: React.CSSProperties = {
 };
 
 export default async function ReceitasPage() {
-  const userId = userIdFromSession(await auth());
+  const session = await auth();
+  const userId = userIdFromSession(session);
   if (!userId) redirect("/login");
+  if (!isFeatureEnabled("receitas", session?.user?.email)) redirect("/dashboard");
   const result = await gerarReceitas(userId);
 
   return (

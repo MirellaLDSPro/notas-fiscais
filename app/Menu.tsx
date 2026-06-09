@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import SearchableSelect from "./SearchableSelect";
+import type { FeatureFlags } from "@/lib/featureFlags";
 
 const C = {
   panel: "#161a18",
@@ -15,12 +16,19 @@ const C = {
   accent2: "#5fb89a",
 };
 
-type Item = { href: string; label: string; sub: string; ownerAware?: boolean; adminOnly?: boolean };
+type Item = {
+  href: string;
+  label: string;
+  sub: string;
+  ownerAware?: boolean;
+  adminOnly?: boolean;
+  flag?: keyof FeatureFlags;
+};
 const ITEMS: Item[] = [
   { href: "/dashboard", label: "Dashboard", sub: "Painel principal de notas e gastos", ownerAware: true },
   { href: "/lista-compras", label: "Lista de compras", sub: "Itens que você compra com frequência", ownerAware: true },
   { href: "/precos", label: "Preços por período", sub: "Quando cada produto fica mais barato", ownerAware: true },
-  { href: "/receitas", label: "Receitas", sub: "O que cozinhar com suas últimas compras" },
+  { href: "/receitas", label: "Receitas", sub: "O que cozinhar com suas últimas compras", flag: "receitas" },
   { href: "/compartilhar", label: "Compartilhar relatório", sub: "Dar acesso de leitura a outro email" },
   { href: "/contato", label: "Contato", sub: "Falar com a autora do projeto" },
   { href: "/admin", label: "Admin", sub: "Visão global da base — só admins", adminOnly: true },
@@ -37,9 +45,16 @@ type MenuProps = {
   logoutAction: () => Promise<void>;
   sharedWithMe?: SharedOwner[];
   isAdmin?: boolean;
+  flags: FeatureFlags;
 };
 
-export default function Menu({ userEmail, logoutAction, sharedWithMe = [], isAdmin = false }: MenuProps) {
+export default function Menu({
+  userEmail,
+  logoutAction,
+  sharedWithMe = [],
+  isAdmin = false,
+  flags,
+}: MenuProps) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
@@ -240,6 +255,7 @@ export default function Menu({ userEmail, logoutAction, sharedWithMe = [], isAdm
 
             {ITEMS.filter((it) => {
               if (it.adminOnly && !isAdmin) return false;
+              if (it.flag && !flags[it.flag]) return false;
               if (viewingOwner && it.href === "/receitas") return false;
               if (viewingOwner && it.adminOnly) return false;
               return true;
