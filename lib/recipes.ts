@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createHash } from "node:crypto";
-import { Redis } from "@upstash/redis";
+import { createClient, type RedisClientType } from "redis";
 import { pickLastThreeNotasWithItems } from "./db";
 
 export type Receita = {
@@ -77,31 +77,39 @@ declare global {
   // eslint-disable-next-line no-var
   var __recipesCache: Map<string, ReceitasPayload> | undefined;
   // eslint-disable-next-line no-var
-  var __recipesRedis: Redis | null | undefined;
+  var __recipesRedisPromise: Promise<RedisClientType | null> | undefined;
 }
 const memCache = (globalThis.__recipesCache ??= new Map<string, ReceitasPayload>());
 
 const CACHE_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 dias
 
-function getRedis(): Redis | null {
-  if (globalThis.__recipesRedis !== undefined) return globalThis.__recipesRedis;
-  if (
-    process.env.UPSTASH_REDIS_REST_URL &&
-    process.env.UPSTASH_REDIS_REST_TOKEN
-  ) {
-    globalThis.__recipesRedis = Redis.fromEnv();
-  } else {
-    globalThis.__recipesRedis = null;
+async function getRedis(): Promise<RedisClientType | null> {
+  if (globalThis.__recipesRedisPromise) return globalThis.__recipesRedisPromise;
+  const url = process.env.REDIS_URL;
+  if (!url) {
+    globalThis.__recipesRedisPromise = Promise.resolve(null);
+    return globalThis.__recipesRedisPromise;
   }
-  return globalThis.__recipesRedis;
+  globalThis.__recipesRedisPromise = (async () => {
+    try {
+      const client: RedisClientType = createClient({ url });
+      client.on("error", (err) => console.error("[recipes] redis client error:", err));
+      await client.connect();
+      return client;
+    } catch (err) {
+      console.error("[recipes] redis connect falhou:", err);
+      return null;
+    }
+  })();
+  return globalThis.__recipesRedisPromise;
 }
 
 async function cacheGet(key: string): Promise<ReceitasPayload | null> {
-  const r = getRedis();
+  const r = await getRedis();
   if (r) {
     try {
-      const v = await r.get<ReceitasPayload>(`recipes:${key}`);
-      return v ?? null;
+      const raw = await r.get(`recipes:${key}`);
+      if (raw) return JSON.parse(raw) as ReceitasPayload;
     } catch (err) {
       console.error("[recipes] redis get falhou, caindo no cache em memória:", err);
     }
@@ -111,10 +119,10 @@ async function cacheGet(key: string): Promise<ReceitasPayload | null> {
 
 async function cacheSet(key: string, val: ReceitasPayload): Promise<void> {
   memCache.set(key, val);
-  const r = getRedis();
+  const r = await getRedis();
   if (r) {
     try {
-      await r.set(`recipes:${key}`, val, { ex: CACHE_TTL_SECONDS });
+      await r.set(`recipes:${key}`, JSON.stringify(val), { EX: CACHE_TTL_SECONDS });
     } catch (err) {
       console.error("[recipes] redis set falhou (cache em memória ainda gravado):", err);
     }
