@@ -33,62 +33,73 @@ async function parseFile(name: string, buf: Buffer): Promise<ParsedNota[]> {
 }
 
 export async function POST(request: Request) {
-  const userId = userIdFromSession(await auth());
-  if (!userId) {
-    return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
-  }
+  try {
+    const userId = userIdFromSession(await auth());
+    if (!userId) {
+      return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
+    }
 
-  const form = await request.formData();
-  const files = form.getAll("file");
-  if (!files.length) {
-    return NextResponse.json({ error: "Nenhum arquivo enviado." }, { status: 400 });
-  }
+    const form = await request.formData();
+    const files = form.getAll("file");
+    if (!files.length) {
+      return NextResponse.json({ error: "Nenhum arquivo enviado." }, { status: 400 });
+    }
 
-  const results: FileResult[] = [];
-  for (const f of files) {
-    if (!(f instanceof File)) continue;
-    const name = f.name || "upload";
-    try {
-      const buf = Buffer.from(await f.arrayBuffer());
-      const parsed = await parseFile(name, buf);
-      const notas: FileSummary[] = [];
-      for (const p of parsed) {
-        const res = await upsertNota(userId, p);
-        if (p.fonte === "PDF" && p.cnpj && p.endereco) {
-          await upsertEstabelecimento({
-            cnpj: p.cnpj,
-            razao_social: p.emitente,
-            logradouro: p.endereco.logradouro,
-            numero: p.endereco.numero,
-            complemento: p.endereco.complemento,
-            bairro: p.endereco.bairro,
-            municipio: p.endereco.municipio,
-            uf: p.endereco.uf,
-            fonte: "PDF",
+    const results: FileResult[] = [];
+    for (const f of files) {
+      if (!(f instanceof File)) continue;
+      const name = f.name || "upload";
+      try {
+        const buf = Buffer.from(await f.arrayBuffer());
+        const parsed = await parseFile(name, buf);
+        const notas: FileSummary[] = [];
+        for (const p of parsed) {
+          const res = await upsertNota(userId, p);
+          if (p.fonte === "PDF" && p.cnpj && p.endereco) {
+            await upsertEstabelecimento({
+              cnpj: p.cnpj,
+              razao_social: p.emitente,
+              logradouro: p.endereco.logradouro,
+              numero: p.endereco.numero,
+              complemento: p.endereco.complemento,
+              bairro: p.endereco.bairro,
+              municipio: p.endereco.municipio,
+              uf: p.endereco.uf,
+              fonte: "PDF",
+            });
+          }
+          notas.push({
+            numero: p.numero,
+            emitente: p.emitente,
+            total: p.valor_total,
+            itens: p.itens.length,
+            action: res.action === "inserted" ? "inserted" : "skipped",
+            fonte: p.fonte,
           });
         }
-        notas.push({
-          numero: p.numero,
-          emitente: p.emitente,
-          total: p.valor_total,
-          itens: p.itens.length,
-          action: res.action === "inserted" ? "inserted" : "skipped",
-          fonte: p.fonte,
+        results.push({
+          name,
+          status: "ok",
+          fonte: parsed[0]?.fonte,
+          notas,
+        });
+      } catch (err) {
+        console.error(`[upload] erro processando ${name}:`, err);
+        results.push({
+          name,
+          status: "error",
+          error: err instanceof Error ? err.message : "Erro ao processar.",
         });
       }
-      results.push({
-        name,
-        status: "ok",
-        fonte: parsed[0]?.fonte,
-        notas,
-      });
-    } catch (err) {
-      results.push({
-        name,
-        status: "error",
-        error: err instanceof Error ? err.message : "Erro ao processar.",
-      });
     }
+    return NextResponse.json({ results });
+  } catch (err) {
+    console.error("[upload] erro de nível superior:", err);
+    return NextResponse.json(
+      {
+        error: err instanceof Error ? err.message : "Erro interno no upload.",
+      },
+      { status: 500 }
+    );
   }
-  return NextResponse.json({ results });
 }
