@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth, userIdFromSession } from "@/auth";
 import { parseNfcePdf } from "@/lib/parseNfce";
+import { parseMhtNfceBuffer } from "@/lib/parseMhtNfce";
 import { parseXlsxBuffer } from "@/lib/parseXlsx";
 import { parseNfpCsvBuffer } from "@/lib/parseNfpCsv";
 import { upsertEstabelecimento, upsertNota, type ParsedNota } from "@/lib/db";
@@ -27,9 +28,10 @@ type FileResult = {
 async function parseFile(name: string, buf: Buffer): Promise<ParsedNota[]> {
   const lower = name.toLowerCase();
   if (lower.endsWith(".pdf")) return [await parseNfcePdf(buf)];
+  if (lower.endsWith(".mht") || lower.endsWith(".mhtml")) return [parseMhtNfceBuffer(buf)];
   if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) return parseXlsxBuffer(buf);
   if (lower.endsWith(".csv")) return parseNfpCsvBuffer(buf);
-  throw new Error("Tipo de arquivo não suportado. Use PDF, XLSX ou CSV.");
+  throw new Error("Tipo de arquivo não suportado. Use PDF, MHT, XLSX ou CSV.");
 }
 
 export async function POST(request: Request) {

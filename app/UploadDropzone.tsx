@@ -113,7 +113,7 @@ export default function UploadDropzone() {
         <input
           ref={inputRef}
           type="file"
-          accept="application/pdf,.pdf,.xlsx,.xls,.csv"
+          accept="application/pdf,.pdf,.mht,.mhtml,multipart/related,message/rfc822,.xlsx,.xls,.csv"
           multiple
           hidden
           disabled={busy}
@@ -123,7 +123,7 @@ export default function UploadDropzone() {
           {busy ? "Processando…" : "Solte aqui ou clique para selecionar"}
         </div>
         <div style={{ fontSize: 11, color: C.muted, fontFamily: "monospace" }}>
-          PDF (NFC-e) · XLSX (planilha) · CSV (NFP)
+          PDF · MHT (página salva) · XLSX · CSV
         </div>
       </label>
 
