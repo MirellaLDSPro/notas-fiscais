@@ -3,7 +3,10 @@
 Dashboard multi-usuário de gastos a partir de **cupons fiscais (NFC-e)**, **planilhas xlsx** e **consulta da Nota Fiscal Paulista**. Login com qualquer conta Google — cada usuário tem seu próprio workspace isolado. Persistência em **Postgres** (Neon, serverless). Os únicos serviços externos chamados são:
 
 - Consultas a `brasilapi.com.br` para enriquecer endereço de estabelecimentos
-- Chamadas à API da Anthropic (`claude-haiku-4-5`) para gerar receitas a partir dos produtos comprados
+- Chamadas à API da Anthropic (`claude-haiku-4-5`) para:
+  - gerar receitas a partir dos produtos comprados (`/receitas`)
+  - categorizar produtos da lista de compras
+  - **fallback de parse de NFC-e por IA** quando o regex não consegue ler o PDF (ex.: foto de cupom embrulhada em PDF)
 
 ## Stack
 
@@ -29,7 +32,7 @@ cp .env.example .env.local      # preencha DATABASE_URL e ANTHROPIC_API_KEY
 
 `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET`: credenciais OAuth do Google Cloud Console. No console do Google, adicione `https://SEU_DOMINIO/api/auth/callback/google` (uma entrada por domínio que você usa) nas Authorized redirect URIs.
 
-`ANTHROPIC_API_KEY`: opcional, só pra `/receitas` e categorização IA da `/lista-compras`.
+`ANTHROPIC_API_KEY`: opcional. Habilita 3 features: `/receitas`, categorização IA da `/lista-compras` e **fallback de parse de NFC-e via IA**. Sem a chave, PDFs que o regex não consegue ler (ex.: foto de cupom em PDF) viram erro silencioso registrado em `/admin/erros`.
 
 > **Não configure `AUTH_URL`** em prod — sem ela, Auth.js v5 detecta a origem da request via `x-forwarded-host` e cada domínio (custom + preview .vercel.app) funciona com seu próprio callback. Setar `AUTH_URL` força um único callback e quebra o login nos outros domínios.
 
@@ -64,12 +67,20 @@ A URL `https://*.ngrok-free.dev` já está liberada em `allowedDevOrigins`. Abra
 | Formato | O que traz | Origem típica |
 | --- | --- | --- |
 | **PDF** (`.pdf`) | Cabeçalho + **itens detalhados** + chave de acesso (44 dígitos) + endereço completo | NFC-e baixada do site da Fazenda SP |
+| **MHT/MHTML** (`.mht`, `.mhtml`) | Idem PDF | Página da NFC-e salva pelo browser |
 | **XLSX** (`.xlsx`) | Cabeçalho + **itens detalhados** (sem chave de acesso, sem endereço) | Planilha consolidada manualmente |
 | **CSV NFP** (`.csv`) | **Só cabeçalho** + créditos da Nota Fiscal Paulista (sem itens, sem endereço) | "Consulta NFP" do portal da Fazenda SP, UTF-16 LE |
+| **PDF-foto** | Idem PDF, via fallback IA (`fonte: "CLAUDE"`) | Foto do papel fiscal embrulhada em PDF (WhatsApp, scanner) |
+
+### Fallback de parse por IA
+
+Quando o parser regex não identifica os campos obrigatórios de uma NFC-e em PDF (cenário típico: foto do papel sem camada de texto), o backend tenta automaticamente um parse completo via **Claude Haiku 4.5** (`lib/ocrNfce.ts → parseNfceViaClaude`). Se a IA conseguir extrair emitente + data + valor + ao menos 1 item, a nota entra na base normalmente com `fonte = 'CLAUDE'`. Caso contrário, vira registro em `notas_erros` com whatever a IA conseguiu garimpar — visível em `/admin/erros`.
 
 ### Deduplicação no upload
 
-Notas são identificadas por **`chave_acesso` (se disponível)** ou pelo par **`(cnpj, numero)`**. Uploads duplicados retornam `action: "skipped"` por nota e não tocam no DB. Veja `lib/db.ts` → `upsertNota`.
+Notas válidas são identificadas por **`chave_acesso` (se disponível)** ou pelo par **`(cnpj, numero)`**. Uploads duplicados retornam `action: "skipped"` por nota e não tocam no DB. Veja `lib/db.ts` → `upsertNota`.
+
+Erros de parse também são deduplicados por usuário: por `chave_acesso` quando a IA conseguiu extraí-la, senão por SHA-256 do arquivo. Re-uploads do mesmo cupom não inflam a tabela de erros. Veja `lib/db.ts → recordNotaErro`.
 
 ## Páginas
 
@@ -83,6 +94,8 @@ Notas são identificadas por **`chave_acesso` (se disponível)** ou pelo par **`
 | `/receitas` | auth | Receitas geradas por Claude Haiku 4.5 a partir dos produtos das **últimas 3 notas com itens** do usuário. Cache por hash do `userId + produtos`. Não disponível em modo de visualização compartilhada. |
 | `/compartilhar` | auth | Gerencia quem tem acesso de leitura ao seu relatório (adicionar/remover por email). |
 | `/contato` | auth | Página estática com canais de contato. |
+| `/admin` | admin | Painel administrativo: KPIs globais, lista de usuários (reset/excluir), atividade recente, contadores de erros e notas parseadas por IA. Restrito a emails em `AUTH_ALLOWED_EMAILS`. |
+| `/admin/erros` | admin | Duas seções: (1) notas que o Claude conseguiu parsear quando o regex falhou — precisam de revisão dos dígitos; (2) falhas totais (nem regex nem IA conseguiram), com dados parciais extraídos. |
 
 ### Compartilhamento de relatórios
 
@@ -103,7 +116,7 @@ Compartilhar com email que ainda não logou é aceito — quando essa pessoa ent
 | Método | Rota | O que faz |
 | --- | --- | --- |
 | `GET` | `/api/notas` | Retorna todas as notas com itens aninhados (`force-dynamic`). |
-| `POST` | `/api/upload` | Multipart com campo `file` (1 ou mais). Detecta tipo por extensão (`.pdf` / `.xlsx`/`.xls` / `.csv`) e roteia para o parser correspondente. PDFs também upsertam estabelecimento via parser local. |
+| `POST` | `/api/upload` | Multipart com campo `file` (1 ou mais). Detecta tipo por extensão (`.pdf`/`.mht`/`.mhtml` / `.xlsx`/`.xls` / `.csv`) e roteia para o parser correspondente. PDFs também upsertam estabelecimento via parser local. Em PDFs que o regex não consegue ler, tenta o fallback via Claude (`lib/ocrNfce.ts`) — sucesso insere com `fonte='CLAUDE'`, falha registra em `notas_erros`. |
 | `GET` | `/api/recipes` | Server-side: lê últimas 3 notas com itens, chama Claude, retorna `{payload, cached}`. `?force=1` ignora o cache de processo. |
 | `GET` / `POST` | `/api/estabelecimentos/sync` | Itera CNPJs sem registro de endereço, consulta `brasilapi.com.br/api/cnpj/v1/{cnpj}` (sequencial, 500 ms de delay) e popula `estabelecimentos` com `fonte: "BRASIL_API"`. |
 
@@ -117,7 +130,7 @@ users (
 notas (
   id, user_id (FK → users), numero, serie, data_emissao, emitente, cnpj,
   valor_total, chave_acesso, creditos, situacao_credito,
-  fonte ('PDF' | 'XLSX' | 'NFP'), created_at,
+  fonte ('PDF' | 'XLSX' | 'NFP' | 'CLAUDE'), created_at,
   UNIQUE (user_id, chave_acesso) WHERE chave_acesso IS NOT NULL,
   UNIQUE (user_id, cnpj, numero) WHERE cnpj IS NOT NULL
 )
@@ -142,6 +155,17 @@ produto_categorias (              -- tabela global, cache do classificador IA
 report_shares (
   id, owner_user_id (FK → users), shared_with_email, created_at,
   UNIQUE (owner_user_id, shared_with_email)
+)
+
+notas_erros (                     -- log de uploads que falharam o parse
+  id, user_id (FK → users),
+  nome_arquivo, erro,
+  numero, chave_acesso,           -- identificadores extraídos antes da falha
+  file_sha256,                    -- hash do conteúdo
+  dedup_key,                      -- chave_acesso ?? file_sha256
+  parsed_partial JSONB,           -- {numero, chave_acesso, emitente, cnpj, data_emissao, valor_total, itens_count}
+  created_at,
+  UNIQUE (user_id, dedup_key)
 )
 ```
 
@@ -225,17 +249,21 @@ dashboard-app/
 │   ├── compartilhar/page.tsx   # gestão de quem tem acesso ao seu relatório
 │   ├── ViewingAsBanner.tsx     # banner "Visualizando relatório de NOME · sair"
 │   ├── contato/page.tsx
+│   ├── admin/page.tsx          # painel administrativo (KPIs globais, usuários, atividade)
+│   ├── admin/erros/page.tsx    # log de erros de upload + notas parseadas por IA
 │   └── api/
 │       ├── auth/[...nextauth]  # handlers do NextAuth
-│       ├── upload/route.ts     # multipart, escopa por userId
+│       ├── upload/route.ts     # multipart, escopa por userId, fallback Claude pra PDF
 │       ├── notas/route.ts      # GET das notas do userId logado
 │       ├── recipes/route.ts
 │       └── estabelecimentos/sync/route.ts
 ├── lib/
 │   ├── db.ts                   # Neon Postgres, schema lazy, upserts (user-scoped)
-│   ├── parseNfce.ts            # PDF NFC-e → ParsedNota (com endereço)
+│   ├── parseNfce.ts            # PDF NFC-e → ParsedNota (com endereço, NotaParseError com hint)
+│   ├── parseMhtNfce.ts         # MHT/MHTML NFC-e (página salva) → ParsedNota
 │   ├── parseXlsx.ts            # planilha → ParsedNota[]
 │   ├── parseNfpCsv.ts          # CSV UTF-16 → ParsedNota[] (header-only)
+│   ├── ocrNfce.ts              # fallback de parse completo via Claude Haiku 4.5
 │   ├── categorizar.ts          # dicionário + classificador IA (Anthropic)
 │   ├── brasilapi.ts            # cliente BrasilAPI com cache em memória
 │   └── recipes.ts              # gerador de receitas (Claude Haiku 4.5)
@@ -259,13 +287,15 @@ dashboard-app/
 - **Estabelecimentos via PDF não são sobrescritos por BrasilAPI**? Na verdade, o oposto: dados de `BRASIL_API` são preferidos quando existem (têm CEP e estão prontos pra geocoding). Veja a lógica em `upsertEstabelecimento`.
 - **Cache de receitas** vive em `globalThis` (sobrevive entre requests do dev server, morre em cold start de serverless). Hash é SHA-256 do `produtos.join("\n")` ordenado.
 - **Custo do Claude por geração de receita**: ~R$ 0,02–0,06 com Haiku 4.5. O system prompt é cacheado (`cache_control: ephemeral`) — chamadas repetidas com o mesmo prompt pagam ~0,1× nos tokens de sistema.
+- **Fallback de parse via Claude só roda quando o regex falha**: PDFs normais (com texto extraível) seguem o caminho `lib/parseNfce.ts` grátis. A chamada à API só acontece quando `NotaParseError` é lançada e o arquivo é PDF — fotos de cupom, PDFs rasterizados, ou layouts não suportados pelos regex. Custo: ~R$ 0,03 por nota que cai no fallback (Haiku 4.5, ~2K tokens input + ~500 output, incluindo o documento base64).
+- **`NotaParseError` carrega "hints"**: `parseNfce.ts` e `parseMhtNfce.ts` extraem `chave_acesso` (44 dígitos) e `numero` *antes* das validações que podem falhar. Quando o parse quebra depois disso, a UI ainda exibe os identificadores capturados, e a tabela de erros pode usá-los como `dedup_key` em vez de só `file_sha256`.
 
 ## Roadmap
 
 Itens com infraestrutura já no DB, esperando UI/serviço externo:
 
 - **Mapa de estabelecimentos**: campos `latitude` / `longitude` em `estabelecimentos` estão prontos. Falta (a) geocoder (Nominatim/OSM grátis ou Mapbox) e (b) componente de mapa (Leaflet).
-- **Leitor de QR Code → cadastra nota**: hoje o scanner só redireciona pro portal da Fazenda. Captura de itens via OCR/visão IA da foto do cupom é viável (~R$ 0,05/foto com Claude Vision) — ver discussão em conversas anteriores.
+- **Leitor de QR Code → cadastra nota**: hoje o scanner ainda só redireciona pro portal da Fazenda. O **OCR via IA de foto já existe** para uploads PDF (`lib/ocrNfce.ts` — extrai todos os campos com `fonte='CLAUDE'`); falta canalizar o frame da câmera do `QrScanButton` por esse mesmo pipeline em vez de só abrir o portal.
 
 ## Troubleshooting
 

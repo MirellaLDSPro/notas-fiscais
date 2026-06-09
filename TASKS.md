@@ -62,6 +62,25 @@ de `preco_medio` já existe (`getListaCompras` em `lib/db.ts` e exibição em
 sinalização visual — comparar a última `vu` observada com a média e marcar
 quando estiver acima de um threshold. Sem dependência forte do item 1.
 
+### 7. QR Scan → upload direto via IA
+O `QrScanButton` hoje só redireciona pro portal da Fazenda. O **OCR de foto
+via Claude já está implementado** (`lib/ocrNfce.ts → parseNfceViaClaude`,
+usado no fallback de upload PDF). Falta canalizar o frame da câmera (ou foto
+tirada) pelo mesmo pipeline em vez de só abrir o portal — usuário aponta a
+câmera, foto vira PDF (ou imagem direta), o backend chama Claude e a nota
+entra com `fonte='CLAUDE'`.
+
 ---
 
-_Atualizado em 08/06/2026. Referência: REQUISITOS.md (RF/RNF, seções 5 e 6)._
+## Concluído
+
+- **Fallback de parse de NFC-e via IA** (`lib/ocrNfce.ts`, RF19). Quando o
+  parser regex de PDF falha (foto em PDF, layout não suportado), o backend
+  chama Claude Haiku 4.5 pra extrair todos os campos. Sucesso vira nota
+  normal com `fonte='CLAUDE'`; falha registra em `notas_erros`.
+- **Painel `/admin/erros`** (RF20). Lista notas parseadas por IA + falhas
+  totais com dados parciais, dedup por usuário.
+
+---
+
+_Atualizado em 09/06/2026. Referência: REQUISITOS.md (RF/RNF, seções 5 e 6)._
