@@ -1,10 +1,17 @@
 import { NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 import { auth, userIdFromSession } from "@/auth";
-import { parseNfcePdf } from "@/lib/parseNfce";
+import { NotaParseError, parseNfcePdf } from "@/lib/parseNfce";
 import { parseMhtNfceBuffer } from "@/lib/parseMhtNfce";
 import { parseXlsxBuffer } from "@/lib/parseXlsx";
 import { parseNfpCsvBuffer } from "@/lib/parseNfpCsv";
-import { upsertEstabelecimento, upsertNota, type ParsedNota } from "@/lib/db";
+import { parseNfceViaClaude } from "@/lib/ocrNfce";
+import {
+  recordNotaErro,
+  upsertEstabelecimento,
+  upsertNota,
+  type ParsedNota,
+} from "@/lib/db";
 
 export const runtime = "nodejs";
 
@@ -23,6 +30,8 @@ type FileResult = {
   fonte?: string;
   notas?: FileSummary[];
   error?: string;
+  numero?: string | null;
+  chave_acesso?: string | null;
 };
 
 async function parseFile(name: string, buf: Buffer): Promise<ParsedNota[]> {
@@ -51,8 +60,8 @@ export async function POST(request: Request) {
     for (const f of files) {
       if (!(f instanceof File)) continue;
       const name = f.name || "upload";
+      const buf = Buffer.from(await f.arrayBuffer());
       try {
-        const buf = Buffer.from(await f.arrayBuffer());
         const parsed = await parseFile(name, buf);
         const notas: FileSummary[] = [];
         for (const p of parsed) {
@@ -86,11 +95,73 @@ export async function POST(request: Request) {
           notas,
         });
       } catch (err) {
-        console.error(`[upload] erro processando ${name}:`, err);
+        const errorMessage = err instanceof Error ? err.message : "Erro ao processar.";
+        const hint = err instanceof NotaParseError ? err.hint : {};
+        console.error(`[upload] regex falhou para ${name}:`, errorMessage);
+
+        let partial: Record<string, unknown> | null = null;
+
+        if (name.toLowerCase().endsWith(".pdf")) {
+          const claude = await parseNfceViaClaude(buf);
+          if (claude.ok) {
+            try {
+              const res = await upsertNota(userId, claude.nota);
+              results.push({
+                name,
+                status: "ok",
+                fonte: "CLAUDE",
+                notas: [
+                  {
+                    numero: claude.nota.numero,
+                    emitente: claude.nota.emitente,
+                    total: claude.nota.valor_total,
+                    itens: claude.nota.itens.length,
+                    action: res.action === "inserted" ? "inserted" : "skipped",
+                    fonte: "CLAUDE",
+                  },
+                ],
+              });
+              continue;
+            } catch (insertErr) {
+              console.error(`[upload] insert pós-Claude falhou para ${name}:`, insertErr);
+              partial = {
+                numero: claude.nota.numero,
+                chave_acesso: claude.nota.chave_acesso,
+                emitente: claude.nota.emitente,
+                cnpj: claude.nota.cnpj,
+                data_emissao: claude.nota.data_emissao,
+                valor_total: claude.nota.valor_total,
+                itens_count: claude.nota.itens.length,
+              };
+            }
+          } else {
+            partial = { ...claude.partial };
+          }
+        }
+
+        const numero = (partial?.numero as string | null) ?? hint.numero ?? null;
+        const chave_acesso =
+          (partial?.chave_acesso as string | null) ?? hint.chave_acesso ?? null;
+
+        try {
+          await recordNotaErro(userId, {
+            nome_arquivo: name,
+            erro: errorMessage,
+            numero,
+            chave_acesso,
+            file_sha256: createHash("sha256").update(buf).digest("hex"),
+            parsed_partial: partial,
+          });
+        } catch (logErr) {
+          console.error(`[upload] falha ao registrar erro de ${name}:`, logErr);
+        }
+
         results.push({
           name,
           status: "error",
-          error: err instanceof Error ? err.message : "Erro ao processar.",
+          error: errorMessage,
+          numero,
+          chave_acesso,
         });
       }
     }

@@ -1,7 +1,28 @@
 import { PDFParse } from "pdf-parse";
 import type { ParsedNota } from "./db";
 
+export type NotaParseHint = {
+  numero?: string | null;
+  chave_acesso?: string | null;
+};
+
+export class NotaParseError extends Error {
+  hint: NotaParseHint;
+  constructor(message: string, hint: NotaParseHint = {}) {
+    super(message);
+    this.name = "NotaParseError";
+    this.hint = hint;
+  }
+}
+
 const toNum = (s: string) => parseFloat(s.replace(/\./g, "").replace(",", "."));
+
+function findChaveAcesso(text: string): string | null {
+  const grouped = text.match(/((?:\d{4}\s+){10}\d{4})/);
+  if (grouped) return grouped[1].replace(/\s+/g, "");
+  const flat = text.match(/(?<!\d)(\d{44})(?!\d)/);
+  return flat ? flat[1] : null;
+}
 
 const ITEM_RE =
   /(.+?)\s+\(Código:\s*(\S+)\s*\)\s+Qtde\.:\s*([\d.,]+)\s+UN:\s*(\S+)\s+Vl\.\s*Unit\.:\s*([\d.,]+)\s+Vl\.\s*Total\s+([\d.,]+)/g;
@@ -67,16 +88,19 @@ function parseNfceText(text: string): ParsedNota {
     }
   }
 
+  const chaveAcesso = findChaveAcesso(text);
+  const numeroFallback = text.match(/Número:\s*(\d+)/)?.[1] ?? null;
+
   const headerMatch = text.match(
     /Número:\s*(\d+)\s+Série:\s*(\d+)\s+Emissão:\s*(\d{2}\/\d{2}\/\d{4})/
   );
   if (!headerMatch) {
-    throw new Error("Não foi possível identificar Número/Série/Emissão. PDF de NFC-e válido?");
+    throw new NotaParseError(
+      "Não foi possível identificar Número/Série/Emissão. PDF de NFC-e válido?",
+      { numero: numeroFallback, chave_acesso: chaveAcesso }
+    );
   }
   const [, numero, serie, dataEmissao] = headerMatch;
-
-  const chaveMatch = text.match(/Chave de acesso:\s*\n?\s*((?:\d{4}\s+){10}\d{4})/);
-  const chaveAcesso = chaveMatch ? chaveMatch[1].replace(/\s+/g, "") : null;
 
   const itens: ParsedNota["itens"] = [];
   for (const m of text.matchAll(ITEM_RE)) {
@@ -95,7 +119,10 @@ function parseNfceText(text: string): ParsedNota {
   }
 
   if (itens.length === 0) {
-    throw new Error("Nenhum item identificado no PDF.");
+    throw new NotaParseError("Nenhum item identificado no PDF.", {
+      numero,
+      chave_acesso: chaveAcesso,
+    });
   }
 
   const valorTotal = Math.round(itens.reduce((s, i) => s + i.vt, 0) * 100) / 100;
@@ -145,20 +172,23 @@ function parseSatText(text: string): ParsedNota {
   const bairroLine = text.match(/Bairro:.+$/m)?.[0] ?? "";
   const endereco = enderecoLine || bairroLine ? parseSatEndereco(enderecoLine, bairroLine) : null;
 
+  const chaveAcesso = findChaveAcesso(text);
   const extratoMatch = text.match(/Extrato\s*Nº:\s*(\d+)/i);
   if (!extratoMatch) {
-    throw new Error("Não foi possível identificar 'Extrato Nº' no cupom SAT.");
+    throw new NotaParseError("Não foi possível identificar 'Extrato Nº' no cupom SAT.", {
+      chave_acesso: chaveAcesso,
+    });
   }
   const numero = extratoMatch[1];
 
   const dataMatch = text.match(/(\d{2}\/\d{2}\/\d{4})\s*-\s*\d{2}:\d{2}:\d{2}/);
   if (!dataMatch) {
-    throw new Error("Não foi possível identificar a data de emissão do cupom SAT.");
+    throw new NotaParseError("Não foi possível identificar a data de emissão do cupom SAT.", {
+      numero,
+      chave_acesso: chaveAcesso,
+    });
   }
   const dataEmissao = dataMatch[1];
-
-  const chaveMatch = text.match(/((?:\d{4}\s+){10}\d{4})/);
-  const chaveAcesso = chaveMatch ? chaveMatch[1].replace(/\s+/g, "") : null;
 
   const itens: ParsedNota["itens"] = [];
   const matches = [...text.matchAll(SAT_ITEM_RE)];
@@ -187,7 +217,10 @@ function parseSatText(text: string): ParsedNota {
   }
 
   if (itens.length === 0) {
-    throw new Error("Nenhum item identificado no cupom SAT.");
+    throw new NotaParseError("Nenhum item identificado no cupom SAT.", {
+      numero,
+      chave_acesso: chaveAcesso,
+    });
   }
 
   const valorTotal = Math.round(itens.reduce((s, i) => s + i.vt, 0) * 100) / 100;

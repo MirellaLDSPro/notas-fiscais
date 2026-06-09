@@ -122,7 +122,6 @@ export async function gerarReceitas(
       output_config: {
         format: {
           type: "json_schema",
-          name: "receitas_brasileiras",
           schema: SCHEMA,
         },
       },

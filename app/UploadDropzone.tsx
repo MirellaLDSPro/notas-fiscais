@@ -19,6 +19,8 @@ type UploadResult = {
   fonte?: string;
   notas?: Summary[];
   error?: string;
+  numero?: string | null;
+  chave_acesso?: string | null;
 };
 
 const C = {
@@ -180,6 +182,14 @@ export default function UploadDropzone() {
                   </div>
                 )}
                 {r.error && <div style={{ color: C.warn, marginTop: 4 }}>{r.error}</div>}
+                {r.status === "error" && (r.numero || r.chave_acesso) && (
+                  <div style={{ color: C.muted, marginTop: 4, fontFamily: "monospace", fontSize: 11 }}>
+                    {r.numero && <div>Nº identificado: #{r.numero}</div>}
+                    {r.chave_acesso && (
+                      <div style={{ wordBreak: "break-all" }}>Chave: {r.chave_acesso}</div>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}

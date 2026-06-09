@@ -1,5 +1,15 @@
-import { parseEnderecoPdf, type EnderecoPdf } from "./parseNfce";
+import { NotaParseError, parseEnderecoPdf, type EnderecoPdf } from "./parseNfce";
 import type { ParsedNota } from "./db";
+
+function findChaveAcessoHtml(html: string): string | null {
+  const block = html.match(/Chave de acesso:[\s\S]{0,400}?(\d[\d\s]+)/i);
+  if (block) {
+    const digits = block[1].replace(/\D+/g, "");
+    if (digits.length === 44) return digits;
+  }
+  const flat = html.replace(/\s+/g, "").match(/(?<!\d)(\d{44})(?!\d)/);
+  return flat ? flat[1] : null;
+}
 
 const toNum = (s: string) => parseFloat(s.replace(/\./g, "").replace(",", "."));
 
@@ -127,6 +137,8 @@ export function parseMhtNfceBuffer(buffer: Buffer): ParsedNota {
     return enderecoLine ? parseEnderecoPdf(enderecoLine) : null;
   })();
 
+  const chave = findChaveAcessoHtml(html);
+
   const headerText = clean(
     html.match(/EMISSÃO NORMAL[\s\S]*?Vers[ãa]o XSLT/i)?.[0] ?? ""
   );
@@ -134,16 +146,13 @@ export function parseMhtNfceBuffer(buffer: Buffer): ParsedNota {
     /N[úu]mero:\s*(\d+)\s+S[ée]rie:\s*(\d+)\s+Data de Emiss[ãa]o:\s*(\d{2}\/\d{2}\/\d{4})/i
   );
   if (!headerMatch) {
-    throw new Error("Não foi possível identificar Número/Série/Data de Emissão na NFC-e (MHT).");
+    const numeroFallback = headerText.match(/N[úu]mero:\s*(\d+)/i)?.[1] ?? null;
+    throw new NotaParseError(
+      "Não foi possível identificar Número/Série/Data de Emissão na NFC-e (MHT).",
+      { numero: numeroFallback, chave_acesso: chave }
+    );
   }
   const [, numero, serie, dataEmissao] = headerMatch;
-
-  const chave = (() => {
-    const block = html.match(/Chave de acesso:[\s\S]{0,400}?(\d[\d\s]+)/i);
-    if (!block) return null;
-    const digits = block[1].replace(/\D+/g, "");
-    return digits.length === 44 ? digits : null;
-  })();
 
   const totalText = html.match(
     /Valor a pagar R\$:[\s\S]*?class\s*=\s*"[^"]*\btotalNumb\b[^"]*"[^>]*>([\d.,]+)/i
@@ -170,7 +179,10 @@ export function parseMhtNfceBuffer(buffer: Buffer): ParsedNota {
   }
 
   if (itens.length === 0) {
-    throw new Error("Nenhum item identificado no MHT da NFC-e.");
+    throw new NotaParseError("Nenhum item identificado no MHT da NFC-e.", {
+      numero,
+      chave_acesso: chave,
+    });
   }
 
   const valorTotal = totalText
