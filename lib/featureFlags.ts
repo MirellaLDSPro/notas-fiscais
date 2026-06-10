@@ -1,4 +1,5 @@
 import { isAdminEmail } from "@/auth";
+import { getUserFlags } from "@/lib/db";
 
 export type FeatureFlags = {
   receitas: boolean;
@@ -10,17 +11,24 @@ const ALL_DISABLED: FeatureFlags = {
   receitas: false,
 };
 
-export function getFeatureFlags(email: string | null | undefined): FeatureFlags {
+export async function getFeatureFlags(
+  email: string | null | undefined,
+  userId: number | null | undefined
+): Promise<FeatureFlags> {
   if (!email) return ALL_DISABLED;
-  const admin = isAdminEmail(email);
+  if (isAdminEmail(email)) return { receitas: true };
+  if (!userId) return ALL_DISABLED;
+  const dbFlags = await getUserFlags(userId);
   return {
-    receitas: admin,
+    receitas: !!dbFlags.receitas,
   };
 }
 
-export function isFeatureEnabled(
+export async function isFeatureEnabled(
   flag: keyof FeatureFlags,
-  email: string | null | undefined
-): boolean {
-  return getFeatureFlags(email)[flag];
+  email: string | null | undefined,
+  userId: number | null | undefined
+): Promise<boolean> {
+  const flags = await getFeatureFlags(email, userId);
+  return flags[flag];
 }

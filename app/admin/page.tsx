@@ -8,6 +8,7 @@ import {
   getAdminStats,
   listAllUsers,
   listRecentActivity,
+  setUserFlag,
 } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -95,6 +96,19 @@ export default async function AdminPage({
     redirect("/admin?result=deleted");
   }
 
+  async function toggleReceitasAction(formData: FormData) {
+    "use server";
+    const session = await auth();
+    if (!isAdminEmail(session?.user?.email)) redirect("/dashboard");
+    const id = Number(formData.get("userId"));
+    const enable = formData.get("enable") === "1";
+    if (!Number.isFinite(id) || id <= 0) redirect("/admin?result=invalid");
+    await setUserFlag(id, "receitas", enable);
+    revalidatePath("/admin");
+    revalidatePath("/", "layout");
+    redirect(`/admin?result=${enable ? "receitas-on" : "receitas-off"}`);
+  }
+
   const banner = (() => {
     if (!result) return null;
     if (result === "reset")
@@ -102,6 +116,8 @@ export default async function AdminPage({
     if (result === "deleted") return { text: "Usuário e dados excluídos.", color: C.accent2 };
     if (result === "self") return { text: "Não dá pra excluir você mesmo.", color: C.warn };
     if (result === "invalid") return { text: "Operação inválida.", color: C.warn };
+    if (result === "receitas-on") return { text: "Receitas habilitadas para o usuário.", color: C.accent2 };
+    if (result === "receitas-off") return { text: "Receitas desabilitadas para o usuário.", color: C.muted };
     return null;
   })();
 
@@ -198,7 +214,7 @@ export default async function AdminPage({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "minmax(0, 2fr) repeat(3, minmax(0, 1fr)) auto",
+              gridTemplateColumns: "minmax(0, 2fr) repeat(3, minmax(0, 1fr)) 250px",
               gap: 0,
               fontSize: 11,
               fontFamily: "monospace",
@@ -213,7 +229,7 @@ export default async function AdminPage({
             <div style={{ textAlign: "right" }}>Notas</div>
             <div style={{ textAlign: "right" }}>Gasto</div>
             <div style={{ textAlign: "right" }}>Último upload</div>
-            <div style={{ width: 160, textAlign: "right" }}>Ações</div>
+            <div style={{ width: 250, textAlign: "right" }}>Ações</div>
           </div>
           {users.length === 0 && (
             <div style={{ padding: 22, color: C.muted, fontSize: 13, textAlign: "center" }}>
@@ -225,7 +241,7 @@ export default async function AdminPage({
               key={u.id}
               style={{
                 display: "grid",
-                gridTemplateColumns: "minmax(0, 2fr) repeat(3, minmax(0, 1fr)) auto",
+                gridTemplateColumns: "minmax(0, 2fr) repeat(3, minmax(0, 1fr)) 250px",
                 gap: 0,
                 alignItems: "center",
                 padding: "12px 14px",
@@ -249,7 +265,30 @@ export default async function AdminPage({
               <div style={{ textAlign: "right", fontFamily: "monospace", color: C.muted }}>
                 {u.ultimaNota ? u.ultimaNota.slice(0, 10) : "—"}
               </div>
-              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", width: 160 }}>
+              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", width: 250, flexWrap: "wrap" }}>
+                <form action={toggleReceitasAction}>
+                  <input type="hidden" name="userId" value={u.id} />
+                  <input type="hidden" name="enable" value={u.flags.receitas ? "0" : "1"} />
+                  <button
+                    type="submit"
+                    style={{
+                      padding: "6px 10px",
+                      background: u.flags.receitas ? "rgba(95,184,154,.12)" : "transparent",
+                      color: u.flags.receitas ? C.accent2 : C.muted,
+                      border: `1px solid ${u.flags.receitas ? C.accent2 : C.line}`,
+                      borderRadius: 6,
+                      fontSize: 11,
+                      cursor: "pointer",
+                    }}
+                    title={
+                      u.flags.receitas
+                        ? "Desabilitar acesso à página /receitas"
+                        : "Habilitar acesso à página /receitas"
+                    }
+                  >
+                    {u.flags.receitas ? "✓ Receitas" : "Receitas off"}
+                  </button>
+                </form>
                 <form action={resetUserAction}>
                   <input type="hidden" name="userId" value={u.id} />
                   <button
