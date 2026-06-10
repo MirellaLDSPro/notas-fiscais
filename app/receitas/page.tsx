@@ -39,7 +39,9 @@ export default async function ReceitasPage() {
   const session = await auth();
   const userId = userIdFromSession(session);
   if (!userId) redirect("/login");
-  if (!isFeatureEnabled("receitas", session?.user?.email)) redirect("/dashboard");
+  if (!(await isFeatureEnabled("receitas", session?.user?.email, userId))) {
+    redirect("/dashboard");
+  }
   const result = await gerarReceitas(userId);
 
   return (

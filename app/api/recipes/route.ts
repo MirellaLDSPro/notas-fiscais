@@ -12,7 +12,7 @@ export async function GET(request: Request) {
   if (!userId) {
     return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
   }
-  if (!isFeatureEnabled("receitas", session?.user?.email)) {
+  if (!(await isFeatureEnabled("receitas", session?.user?.email, userId))) {
     return NextResponse.json({ error: "Feature indisponível." }, { status: 403 });
   }
   const force = new URL(request.url).searchParams.get("force") === "1";

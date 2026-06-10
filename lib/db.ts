@@ -130,6 +130,11 @@ async function initSchema(): Promise<void> {
   await sql()`CREATE INDEX IF NOT EXISTS idx_report_shares_email ON report_shares(shared_with_email)`;
 
   await sql()`
+    ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS flags JSONB NOT NULL DEFAULT '{}'::jsonb
+  `;
+
+  await sql()`
     CREATE TABLE IF NOT EXISTS notas_erros (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1050,6 +1055,10 @@ export async function getAdminStats(): Promise<AdminStats> {
   };
 }
 
+export type UserFlags = {
+  receitas?: boolean;
+};
+
 export type AdminUserRow = {
   id: number;
   email: string;
@@ -1058,6 +1067,7 @@ export type AdminUserRow = {
   qtdNotas: number;
   gastoTotal: number;
   ultimaNota: string | null;
+  flags: UserFlags;
 };
 
 export async function listAllUsers(): Promise<AdminUserRow[]> {
@@ -1068,18 +1078,20 @@ export async function listAllUsers(): Promise<AdminUserRow[]> {
       u.email,
       u.name,
       u.created_at,
+      u.flags,
       COUNT(n.id)::bigint AS qtd_notas,
       COALESCE(SUM(n.valor_total), 0)::double precision AS gasto_total,
       MAX(n.created_at) AS ultima_nota
     FROM users u
     LEFT JOIN notas n ON n.user_id = u.id
-    GROUP BY u.id, u.email, u.name, u.created_at
+    GROUP BY u.id, u.email, u.name, u.created_at, u.flags
     ORDER BY qtd_notas DESC, u.created_at DESC
   `) as Array<{
     id: number;
     email: string;
     name: string | null;
     created_at: string;
+    flags: UserFlags | null;
     qtd_notas: number;
     gasto_total: number;
     ultima_nota: string | null;
@@ -1089,10 +1101,32 @@ export async function listAllUsers(): Promise<AdminUserRow[]> {
     email: r.email,
     name: r.name,
     createdAt: r.created_at,
+    flags: r.flags ?? {},
     qtdNotas: Number(r.qtd_notas),
     gastoTotal: Number(r.gasto_total),
     ultimaNota: r.ultima_nota,
   }));
+}
+
+export async function getUserFlags(userId: number): Promise<UserFlags> {
+  await ready();
+  const rows = (await sql()`
+    SELECT flags FROM users WHERE id = ${userId} LIMIT 1
+  `) as Array<{ flags: UserFlags | null }>;
+  return rows[0]?.flags ?? {};
+}
+
+export async function setUserFlag(
+  userId: number,
+  flag: keyof UserFlags,
+  enabled: boolean
+): Promise<void> {
+  await ready();
+  await sql()`
+    UPDATE users
+       SET flags = COALESCE(flags, '{}'::jsonb) || jsonb_build_object(${flag}::text, ${enabled}::boolean)
+     WHERE id = ${userId}
+  `;
 }
 
 export type AdminActivityRow = {

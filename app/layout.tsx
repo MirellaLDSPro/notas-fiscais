@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Menu from "./Menu";
-import { auth, isAdminEmail, signOut } from "@/auth";
+import { auth, isAdminEmail, signOut, userIdFromSession } from "@/auth";
 import { listOwnersSharingWith } from "@/lib/db";
 import { getFeatureFlags } from "@/lib/featureFlags";
 
@@ -31,7 +31,8 @@ export default async function RootLayout({
     ? await listOwnersSharingWith(session.user.email)
     : [];
   const isAdmin = isAdminEmail(session?.user?.email);
-  const flags = getFeatureFlags(session?.user?.email);
+  const userId = userIdFromSession(session);
+  const flags = await getFeatureFlags(session?.user?.email, userId);
 
   async function logout() {
     "use server";
