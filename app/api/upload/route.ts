@@ -101,8 +101,20 @@ export async function POST(request: Request) {
 
         let partial: Record<string, unknown> | null = null;
 
-        if (name.toLowerCase().endsWith(".pdf")) {
-          const claude = await parseNfceViaClaude(buf);
+        // Attempt Claude fallback for any supported file type
+        const ext = name.toLowerCase().split('.').pop() || '';
+        const supportedExts = ['pdf','mht','mhtml','xlsx','xls','csv'];
+        if (supportedExts.includes(ext)) {
+          const mediaMap: Record<string,string> = {
+            pdf: 'application/pdf',
+            mht: 'text/html',
+            mhtml: 'text/html',
+            xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            xls: 'application/vnd.ms-excel',
+            csv: 'text/csv',
+          };
+          const mediaType = mediaMap[ext] ?? 'application/octet-stream';
+          const claude = await parseNfceViaClaude(buf, mediaType);
           if (claude.ok) {
             try {
               const res = await upsertNota(userId, claude.nota);

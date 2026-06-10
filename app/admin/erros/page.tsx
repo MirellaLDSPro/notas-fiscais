@@ -6,6 +6,8 @@ import {
   deleteErroUpload,
   listAllErrosUpload,
   listNotasParsedByClaude,
+  searchErrosUpload,
+  searchNotasParsedByClaude,
 } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -51,14 +53,30 @@ const card: React.CSSProperties = {
 export default async function AdminErrosPage({
   searchParams,
 }: {
-  searchParams: Promise<{ result?: string }>;
+  searchParams: Promise<{ result?: string; q?: string }>;
 }) {
   await requireAdmin();
-  const { result } = await searchParams;
-  const [erros, claudeNotas] = await Promise.all([
-    listAllErrosUpload(200),
-    listNotasParsedByClaude(200),
-  ]);
+  const { result, q } = await searchParams;
+
+  let erros = [] as any[];
+  let claudeNotas = [] as any[];
+
+  if (q && q.trim()) {
+    const [errosRows, claudeRows] = await Promise.all([
+      searchErrosUpload(q, 200),
+      searchNotasParsedByClaude(q, 200),
+    ]);
+    erros = errosRows;
+    claudeNotas = claudeRows;
+  } else {
+    const [errosRows, claudeRows] = await Promise.all([
+      listAllErrosUpload(200),
+      listNotasParsedByClaude(200),
+    ]);
+    erros = errosRows;
+    claudeNotas = claudeRows;
+  }
+
   const BRL = new Intl.NumberFormat("pt-BR", {
     style: "currency",
     currency: "BRL",
@@ -114,7 +132,7 @@ export default async function AdminErrosPage({
           href="/admin"
           style={{
             display: "inline-block",
-            marginBottom: 20,
+            marginBottom: 12,
             color: C.muted,
             fontSize: 12,
             fontFamily: "monospace",
@@ -124,6 +142,30 @@ export default async function AdminErrosPage({
         >
           ← voltar ao painel admin
         </Link>
+
+        <form method="get" style={{ marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            name="q"
+            defaultValue={q ?? ''}
+            placeholder="Pesquisar por número, chave, emitente, email ou texto..."
+            style={{
+              flex: 1,
+              padding: '8px 10px',
+              borderRadius: 6,
+              border: `1px solid ${C.line}`,
+              background: C.panel2,
+              color: C.ink,
+            }}
+          />
+          <button type="submit" style={{ padding: '8px 12px', borderRadius: 6, background: C.accent2, color: '#000', border: 'none', cursor: 'pointer' }}>
+            Buscar
+          </button>
+          {q && (
+            <Link href="/admin/erros" style={{ color: C.muted, fontSize: 12, fontFamily: 'monospace', textDecoration: 'none' }}>
+              Limpar
+            </Link>
+          )}
+        </form>
 
         {banner && (
           <div

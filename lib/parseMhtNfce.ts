@@ -142,8 +142,9 @@ export function parseMhtNfceBuffer(buffer: Buffer): ParsedNota {
   const headerText = clean(
     html.match(/EMISSÃO NORMAL[\s\S]*?Vers[ãa]o XSLT/i)?.[0] ?? ""
   );
+  // Aceita tanto "Data de Emissão" quanto apenas "Emissão" para maior robustez
   const headerMatch = headerText.match(
-    /N[úu]mero:\s*(\d+)\s+S[ée]rie:\s*(\d+)\s+Data de Emiss[ãa]o:\s*(\d{2}\/\d{2}\/\d{4})/i
+    /N[úu]mero:\s*(\d+)\s+S[ée]rie:\s*(\d+)\s+(?:Data\s+de\s+Emiss(?:ã|a)o|Emiss(?:ã|a)o):\s*(\d{2}\/\d{2}\/\d{4})/i
   );
   if (!headerMatch) {
     const numeroFallback = headerText.match(/N[úu]mero:\s*(\d+)/i)?.[1] ?? null;

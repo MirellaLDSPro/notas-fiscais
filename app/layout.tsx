@@ -4,6 +4,7 @@ import "./globals.css";
 import Menu from "./Menu";
 import { auth, isAdminEmail, signOut, userIdFromSession } from "@/auth";
 import { listOwnersSharingWith } from "@/lib/db";
+import AnalyticsClient from './AnalyticsClient';
 import { getFeatureFlags } from "@/lib/featureFlags";
 
 const geistSans = Geist({
@@ -55,6 +56,7 @@ export default async function RootLayout({
           />
         )}
         {children}
+        <AnalyticsClient />
       </body>
     </html>
   );
