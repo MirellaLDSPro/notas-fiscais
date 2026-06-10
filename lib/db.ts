@@ -1313,6 +1313,116 @@ export async function listNotasParsedByClaude(
   }));
 }
 
+export async function searchErrosUpload(query: string, limit = 100): Promise<AdminErroUploadRow[]> {
+  await ready();
+  const safeLimit = Math.max(1, Math.min(500, Math.trunc(limit)));
+  const like = `%${query}%`;
+  const rows = (await sql()`
+    SELECT
+      e.id,
+      e.user_id,
+      u.email,
+      e.nome_arquivo,
+      e.erro,
+      e.numero,
+      e.chave_acesso,
+      e.parsed_partial,
+      e.created_at
+    FROM notas_erros e
+    JOIN users u ON u.id = e.user_id
+    WHERE (
+      e.nome_arquivo ILIKE ${like} OR
+      e.erro ILIKE ${like} OR
+      e.numero ILIKE ${like} OR
+      e.chave_acesso ILIKE ${like} OR
+      u.email ILIKE ${like} OR
+      e.parsed_partial::text ILIKE ${like}
+    )
+    ORDER BY e.created_at DESC, e.id DESC
+    LIMIT ${safeLimit}
+  `) as Array<{
+    id: number;
+    user_id: number;
+    email: string;
+    nome_arquivo: string;
+    erro: string;
+    numero: string | null;
+    chave_acesso: string | null;
+    parsed_partial: ParsedPartial | null;
+    created_at: string;
+  }>;
+  return rows.map((r) => ({
+    id: Number(r.id),
+    userId: Number(r.user_id),
+    userEmail: r.email,
+    nomeArquivo: r.nome_arquivo,
+    erro: r.erro,
+    numero: r.numero,
+    chaveAcesso: r.chave_acesso,
+    parsedPartial: r.parsed_partial,
+    createdAt: r.created_at,
+  }));
+}
+
+export async function searchNotasParsedByClaude(query: string, limit = 100): Promise<AdminClaudeNotaRow[]> {
+  await ready();
+  const safeLimit = Math.max(1, Math.min(500, Math.trunc(limit)));
+  const like = `%${query}%`;
+  const rows = (await sql()`
+    SELECT
+      n.id,
+      n.user_id,
+      u.email,
+      n.numero,
+      n.serie,
+      n.emitente,
+      n.cnpj,
+      n.data_emissao,
+      n.valor_total,
+      n.chave_acesso,
+      n.created_at,
+      (SELECT COUNT(*) FROM itens i WHERE i.nota_id = n.id)::bigint AS itens_count
+    FROM notas n
+    JOIN users u ON u.id = n.user_id
+    WHERE n.fonte = 'CLAUDE' AND (
+      n.numero ILIKE ${like} OR
+      n.emitente ILIKE ${like} OR
+      n.chave_acesso ILIKE ${like} OR
+      n.cnpj ILIKE ${like} OR
+      u.email ILIKE ${like}
+    )
+    ORDER BY n.created_at DESC, n.id DESC
+    LIMIT ${safeLimit}
+  `) as Array<{
+    id: number;
+    user_id: number;
+    email: string;
+    numero: string;
+    serie: string | null;
+    emitente: string;
+    cnpj: string | null;
+    data_emissao: string;
+    valor_total: number;
+    chave_acesso: string | null;
+    created_at: string;
+    itens_count: number;
+  }>;
+  return rows.map((r) => ({
+    id: Number(r.id),
+    userId: Number(r.user_id),
+    userEmail: r.email,
+    numero: r.numero,
+    serie: r.serie,
+    emitente: r.emitente,
+    cnpj: r.cnpj,
+    dataEmissao: r.data_emissao,
+    valorTotal: Number(r.valor_total),
+    chaveAcesso: r.chave_acesso,
+    itensCount: Number(r.itens_count),
+    createdAt: r.created_at,
+  }));
+}
+
 export async function deleteUserNotas(userId: number): Promise<number> {
   await ready();
   const rows = (await sql()`
