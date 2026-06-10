@@ -139,9 +139,10 @@ export async function parseNfceViaClaude(buf: Buffer, mediaType = "application/p
               type: "document",
               source: {
                 type: "base64",
-                media_type: mediaType,
+                media_type: mediaType as any,
                 data: buf.toString("base64"),
               },
+
             },
             {
               type: "text",
