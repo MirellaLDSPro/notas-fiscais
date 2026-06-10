@@ -120,7 +120,7 @@ function toPartial(out: ClaudeOutput | null): PartialNotaData {
   };
 }
 
-export async function parseNfceViaClaude(buf: Buffer): Promise<ClaudeParseResult> {
+export async function parseNfceViaClaude(buf: Buffer, mediaType = "application/pdf"): Promise<ClaudeParseResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return { ok: false, partial: EMPTY_PARTIAL };
 
@@ -139,7 +139,7 @@ export async function parseNfceViaClaude(buf: Buffer): Promise<ClaudeParseResult
               type: "document",
               source: {
                 type: "base64",
-                media_type: "application/pdf",
+                media_type: mediaType,
                 data: buf.toString("base64"),
               },
             },
