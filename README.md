@@ -16,7 +16,8 @@ Dashboard multi-usuário de gastos a partir de **cupons fiscais (NFC-e)**, **pla
 - **xlsx** — leitura de planilhas
 - **recharts** — gráficos
 - **qr-scanner** — leitor de QR Code no celular
-- **@anthropic-ai/sdk** — geração de receitas com Claude
+- **@anthropic-ai/sdk** — geração de receitas com Claude, OCR de NFC-e em PDF e categorização de produtos
+- **redis** (node-redis) — cache persistente das receitas via Redis Cloud (opcional, fallback pra Map em memória)
 
 ## Setup
 
@@ -33,6 +34,8 @@ cp .env.example .env.local      # preencha DATABASE_URL e ANTHROPIC_API_KEY
 `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET`: credenciais OAuth do Google Cloud Console. No console do Google, adicione `https://SEU_DOMINIO/api/auth/callback/google` (uma entrada por domínio que você usa) nas Authorized redirect URIs.
 
 `ANTHROPIC_API_KEY`: opcional. Habilita 3 features: `/receitas`, categorização IA da `/lista-compras` e **fallback de parse de NFC-e via IA**. Sem a chave, PDFs que o regex não consegue ler (ex.: foto de cupom em PDF) viram erro silencioso registrado em `/admin/erros`.
+
+`REDIS_URL`: opcional. Quando setada, o cache de receitas vai pro Redis (sobrevive cold start na Vercel). Sem ela, cache fica em memória do processo (Map). Provisione pelo marketplace da Vercel → Storage → Redis (free tier 30 MB serve folgado). Veja seção **Feature flags e cache** abaixo.
 
 > **Não configure `AUTH_URL`** em prod — sem ela, Auth.js v5 detecta a origem da request via `x-forwarded-host` e cada domínio (custom + preview .vercel.app) funciona com seu próprio callback. Setar `AUTH_URL` força um único callback e quebra o login nos outros domínios.
 
@@ -76,6 +79,27 @@ A URL `https://*.ngrok-free.dev` já está liberada em `allowedDevOrigins`. Abra
 
 Quando o parser regex não identifica os campos obrigatórios de uma NFC-e em PDF (cenário típico: foto do papel sem camada de texto), o backend tenta automaticamente um parse completo via **Claude Haiku 4.5** (`lib/ocrNfce.ts → parseNfceViaClaude`). Se a IA conseguir extrair emitente + data + valor + ao menos 1 item, a nota entra na base normalmente com `fonte = 'CLAUDE'`. Caso contrário, vira registro em `notas_erros` com whatever a IA conseguiu garimpar — visível em `/admin/erros`.
 
+### Feature flags e cache
+
+`/receitas` é uma feature **gateada** pra rollout gradual (preparando monetização futura). Estrutura em `lib/featureFlags.ts`:
+
+```ts
+type FeatureFlags = { receitas: boolean };
+
+async function getFeatureFlags(email, userId): Promise<FeatureFlags> {
+  if (isAdminEmail(email)) return { receitas: true };       // admin: tudo on
+  if (!userId) return { receitas: false };
+  const dbFlags = await getUserFlags(userId);
+  return { receitas: !!dbFlags.receitas };                  // senão: override por usuário
+}
+```
+
+Gateada em 3 camadas: **menu** (some o link), **página** (`redirect("/dashboard")`) e **API** (`403`).
+
+**Habilitar para um usuário específico** (sem env var, sem deploy): admin abre `/admin`, clica no botão "Receitas off" da linha do usuário → `setUserFlag(id, "receitas", true)` grava em `users.flags` JSONB → próxima request o usuário tem acesso.
+
+**Cache persistente de receitas:** quando `REDIS_URL` está setada, o resultado fica no Redis com TTL de 30 dias (chave = SHA-256 de `userId + produtos`). Sobrevive cold start na Vercel — sem Redis, cada cold start chama o Claude de novo. Falha no Redis cai pra Map em memória sem propagar erro.
+
 ### Deduplicação no upload
 
 Notas válidas são identificadas por **`chave_acesso` (se disponível)** ou pelo par **`(cnpj, numero)`**. Uploads duplicados retornam `action: "skipped"` por nota e não tocam no DB. Veja `lib/db.ts` → `upsertNota`.
@@ -91,7 +115,7 @@ Erros de parse também são deduplicados por usuário: por `chave_acesso` quando
 | `/dashboard` | auth | Dashboard principal: KPIs, gráfico "Gasto por compra/mês" (clicável → abre modal com as notas), top produtos, evolução de preço, créditos NFP, upload e scanner de QR. |
 | `/precos` | auth | Comparador de preço por produto recorrente — preço médio por mês e por dia da semana, melhor mês destacado. |
 | `/lista-compras` | auth | Categorias recorrentes (presentes em 2+ notas) como checklist interativo. Estado marcado fica salvo no aparelho. |
-| `/receitas` | auth | Receitas geradas por Claude Haiku 4.5 a partir dos produtos das **últimas 3 notas com itens** do usuário. Cache por hash do `userId + produtos`. Não disponível em modo de visualização compartilhada. |
+| `/receitas` | auth + flag | Receitas geradas por Claude Haiku 4.5 a partir dos produtos das **últimas 3 notas com itens** do usuário. **Gateada pela feature flag `receitas`** (default off para não-admins; admin habilita por usuário em `/admin`). Cache persistente em Redis quando `REDIS_URL` setada, senão em memória. Não disponível em modo de visualização compartilhada. |
 | `/compartilhar` | auth | Gerencia quem tem acesso de leitura ao seu relatório (adicionar/remover por email). |
 | `/contato` | auth | Página estática com canais de contato. |
 | `/admin` | admin | Painel administrativo: KPIs globais, lista de usuários (reset/excluir), atividade recente, contadores de erros e notas parseadas por IA. Restrito a emails em `AUTH_ALLOWED_EMAILS`. |
@@ -124,7 +148,8 @@ Compartilhar com email que ainda não logou é aceito — quando essa pessoa ent
 
 ```sql
 users (
-  id, email (UNIQUE), name, created_at
+  id, email (UNIQUE), name, created_at,
+  flags JSONB DEFAULT '{}'::jsonb  -- overrides por usuário (ex: { receitas: true })
 )
 
 notas (
@@ -264,9 +289,10 @@ dashboard-app/
 │   ├── parseXlsx.ts            # planilha → ParsedNota[]
 │   ├── parseNfpCsv.ts          # CSV UTF-16 → ParsedNota[] (header-only)
 │   ├── ocrNfce.ts              # fallback de parse completo via Claude Haiku 4.5
+│   ├── featureFlags.ts         # flags por usuário (admin OU users.flags do DB)
 │   ├── categorizar.ts          # dicionário + classificador IA (Anthropic)
 │   ├── brasilapi.ts            # cliente BrasilAPI com cache em memória
-│   └── recipes.ts              # gerador de receitas (Claude Haiku 4.5)
+│   └── recipes.ts              # gerador de receitas (Claude Haiku 4.5) + cache Redis
 ├── scripts/
 │   └── migrate-from-sqlite.ts  # importa data/notas.db antigo para o Neon
 ├── auth.config.ts              # edge-safe: providers + session + pages (importado pelo middleware)
@@ -285,7 +311,8 @@ dashboard-app/
 - **CSV NFP gera notas header-only** (sem itens) e participa do "Total gasto" / "Gasto por mês". Para features que dependem de produto (top, evolução, comparação, receitas), só notas com itens são consideradas.
 - **Receitas usam as 3 notas com itens mais recentes** (ordenadas por `created_at DESC`), não as 3 últimas em geral — evita o caso de só ter NFP-only recente sem dados úteis.
 - **Estabelecimentos via PDF não são sobrescritos por BrasilAPI**? Na verdade, o oposto: dados de `BRASIL_API` são preferidos quando existem (têm CEP e estão prontos pra geocoding). Veja a lógica em `upsertEstabelecimento`.
-- **Cache de receitas** vive em `globalThis` (sobrevive entre requests do dev server, morre em cold start de serverless). Hash é SHA-256 do `produtos.join("\n")` ordenado.
+- **Cache de receitas** tem 2 camadas: Map em memória (sempre escrito, sobrevive entre requests no mesmo processo) + Redis quando `REDIS_URL` está setada (escrito em paralelo, sobrevive cold start). Hash é SHA-256 de `userId:produtos.join("\n")`. Falha do Redis nunca propaga — só loga e segue com o Map. TTL no Redis: 30 dias.
+- **Feature flag por usuário sem env var:** flag `receitas` é admin-only por default; admin habilita usuários específicos via `/admin` (botão na linha do usuário). Persiste em `users.flags JSONB`. Sem redeploy, sem mexer em vars. Custo: 1 query DB extra por page load em `app/layout.tsx` (~5-10 ms). Se virar gargalo, dá pra hidratar no JWT no callback `signIn` do NextAuth.
 - **Custo do Claude por geração de receita**: ~R$ 0,02–0,06 com Haiku 4.5. O system prompt é cacheado (`cache_control: ephemeral`) — chamadas repetidas com o mesmo prompt pagam ~0,1× nos tokens de sistema.
 - **Fallback de parse via Claude só roda quando o regex falha**: PDFs normais (com texto extraível) seguem o caminho `lib/parseNfce.ts` grátis. A chamada à API só acontece quando `NotaParseError` é lançada e o arquivo é PDF — fotos de cupom, PDFs rasterizados, ou layouts não suportados pelos regex. Custo: ~R$ 0,03 por nota que cai no fallback (Haiku 4.5, ~2K tokens input + ~500 output, incluindo o documento base64).
 - **`NotaParseError` carrega "hints"**: `parseNfce.ts` e `parseMhtNfce.ts` extraem `chave_acesso` (44 dígitos) e `numero` *antes* das validações que podem falhar. Quando o parse quebra depois disso, a UI ainda exibe os identificadores capturados, e a tabela de erros pode usá-los como `dedup_key` em vez de só `file_sha256`.

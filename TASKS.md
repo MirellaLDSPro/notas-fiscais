@@ -80,7 +80,17 @@ entra com `fonte='CLAUDE'`.
   normal com `fonte='CLAUDE'`; falha registra em `notas_erros`.
 - **Painel `/admin/erros`** (RF20). Lista notas parseadas por IA + falhas
   totais com dados parciais, dedup por usuário.
+- **Sistema de feature flags** (`lib/featureFlags.ts`, RF21). `/receitas`
+  passa a ser flag-gated em 3 camadas (menu, página, API). Default:
+  admin-only via `AUTH_ALLOWED_EMAILS`.
+- **Toggle por usuário no `/admin`** (RF22). Admin clica em "Receitas off"
+  na linha do usuário pra habilitar; persiste em `users.flags` JSONB.
+  Sem env var, sem redeploy.
+- **Cache persistente de receitas via Redis** (RF23). Quando `REDIS_URL`
+  está setada, payload das receitas vai pro Redis com TTL de 30 dias.
+  Sobrevive cold start de serverless. Fallback transparente pra Map em
+  memória quando não tem Redis.
 
 ---
 
-_Atualizado em 09/06/2026. Referência: REQUISITOS.md (RF/RNF, seções 5 e 6)._
+_Atualizado em 10/06/2026. Referência: REQUISITOS.md (RF/RNF, seções 5 e 6)._

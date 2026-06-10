@@ -26,7 +26,7 @@ receitas com IA a partir dos produtos comprados.
 | RF06 | Deve calcular e exibir uma **lista de compras** em `/lista-compras` com produtos agrupados por categoria, considerando apenas categorias presentes em **2 ou mais notas distintas**. |
 | RF07 | A lista de compras deve funcionar como **checklist interativo**, com persistência local do estado marcado por aparelho (sobrevive a refresh durante a compra). |
 | RF08 | A lista de compras deve recalcular automaticamente a cada visita após um novo upload — sem cache persistente. |
-| RF09 | Em `/receitas`, o sistema deve gerar de 3 a 5 receitas brasileiras a partir dos produtos das **3 notas com itens mais recentes**, usando a Claude API (`claude-haiku-4-5`). |
+| RF09 | Em `/receitas`, o sistema deve gerar de 3 a 5 receitas brasileiras a partir dos produtos das **3 notas com itens mais recentes**, usando a Claude API (`claude-haiku-4-5`). Acesso gateado pela feature flag `receitas` (RF21). |
 | RF10 | O sistema deve consultar a **BrasilAPI** para enriquecer endereços de estabelecimentos a partir do CNPJ e gravar em tabela própria. |
 | RF11 | O acesso às rotas de aplicação (exceto `/`, `/login` e `/api/auth/*`) deve exigir autenticação via **Google OAuth**. A landing `/` é pública. |
 | RF12 | Qualquer conta Google deve poder logar e ter um **workspace isolado**: as notas (`notas`/`itens`) são escopadas por `user_id` e cada usuário só vê os próprios dados. |
@@ -38,6 +38,9 @@ receitas com IA a partir dos produtos comprados.
 | RF18 | A página `/receitas` não participa do compartilhamento — fica oculta do menu em modo viewing. |
 | RF19 | Quando o parser regex de NFC-e em PDF falhar, o sistema deve tentar um **fallback automático via Claude Haiku 4.5** (parse completo: emitente, CNPJ, data, valor, itens, chave). Sucesso = nota entra na base com `fonte='CLAUDE'`. Falha = registra em `notas_erros` com os dados parciais extraídos pela IA. |
 | RF20 | O painel `/admin/erros` deve listar, para administradores, (a) notas parseadas por IA — para revisão de dígitos — e (b) falhas totais com dados parciais. Erros são deduplicados por usuário (chave de acesso, senão SHA-256 do arquivo). |
+| RF21 | O sistema deve expor um **sistema de feature flags** (`lib/featureFlags.ts`) com gates por usuário. Regra atual: `receitas` é true para admins (via `AUTH_ALLOWED_EMAILS`) OU para usuários com `users.flags.receitas = true` no banco. Aplicada em 3 camadas (menu, página, API). Mudanças no flag por usuário não exigem redeploy nem alteração de env var. |
+| RF22 | O administrador deve poder habilitar/desabilitar feature flags por usuário direto em `/admin`, com 1 clique. Toggle persiste em `users.flags` JSONB e revalida o menu do alvo imediatamente. |
+| RF23 | Quando `REDIS_URL` estiver configurada, o cache de receitas deve persistir no Redis (TTL 30 dias) para sobreviver a cold starts de serverless. Falhas do Redis caem transparentemente para o cache em memória (Map) sem propagar erro ao usuário. |
 
 ## 3. Requisitos não funcionais
 
@@ -75,6 +78,7 @@ receitas com IA a partir dos produtos comprados.
 | --- | --- | --- |
 | **brasilapi.com.br** | enriquecer endereços por CNPJ | item sem endereço, sync log marca erro |
 | **api.anthropic.com** | gerar receitas, categorizar produtos e parsear NFC-e que o regex não consegue ler | `/receitas` retorna placeholder; lista de compras usa fallback (dicionário + 1ª palavra); PDFs ilegíveis viram registro em `/admin/erros` em vez de inserir nota |
+| **Redis Cloud** (via Vercel Marketplace) | cache persistente de receitas (TTL 30 dias) | fallback automático pra Map em memória sem perda de funcionalidade — só perde a persistência entre cold starts |
 | **accounts.google.com** | OAuth de login | usuário não consegue logar — único caminho de auth no momento |
 
 ### Variáveis de ambiente obrigatórias
@@ -84,6 +88,7 @@ receitas com IA a partir dos produtos comprados.
 
 ### Variáveis opcionais
 - `ANTHROPIC_API_KEY` — habilita `/receitas`, categorização IA da lista de compras e o **fallback de parse de NFC-e em PDF** (`lib/ocrNfce.ts → parseNfceViaClaude`). Sem a chave, PDFs que o regex não decifra viram registro silencioso em `notas_erros`.
+- `REDIS_URL` — habilita cache persistente das receitas (Redis Cloud via Vercel Marketplace). Sem ela, cache em memória (Map em `globalThis`). Format: `redis://default:SENHA@HOST:PORTA`.
 - `AUTH_ALLOWED_EMAILS` — lista de emails (separados por vírgula) com acesso ao painel `/admin`. Não restringe login: cadastro segue aberto, apenas o link "Admin" no menu e a rota `/admin` ficam gated. Sem a variável, ninguém é admin.
 
 ### Variáveis que **não** devem ser setadas
@@ -92,7 +97,8 @@ receitas com IA a partir dos produtos comprados.
 ## 5. Modelo de dados
 
 ```
-users (id, email UNIQUE, name, created_at)
+users (id, email UNIQUE, name, created_at,
+       flags JSONB DEFAULT '{}'::jsonb)   -- per-user feature overrides
 notas (id, user_id FK → users, numero, serie, data_emissao, emitente, cnpj,
        valor_total, chave_acesso, creditos, situacao_credito,
        fonte ∈ {'PDF','XLSX','NFP','CLAUDE'}, created_at,
@@ -130,6 +136,11 @@ notas_erros (id, user_id FK → users, nome_arquivo, erro,
   `dedup_key = chave_acesso ?? file_sha256`. `parsed_partial` (JSONB) guarda
   qualquer dado que o Claude conseguiu extrair (emitente, CNPJ, valor, etc.)
   pra revisão administrativa em `/admin/erros`.
+- `users.flags` (JSONB) guarda overrides per-user de feature flags (ex.:
+  `{ "receitas": true }`). Lida em todo page load pelo `lib/featureFlags.ts`.
+  Setada via UI em `/admin` (server action chama `setUserFlag` com merge
+  atômico via `jsonb_build_object`). Admins (`AUTH_ALLOWED_EMAILS`) recebem
+  todas as flags como `true` independente do banco.
 
 ## 6. Restrições / fora de escopo
 
