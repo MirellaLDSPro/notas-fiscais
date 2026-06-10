@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 // TODO: substituir pelo link do YouTube quando o vídeo estiver pronto.
 // Aceita formatos: https://www.youtube.com/watch?v=ID  •  https://youtu.be/ID  •  https://www.youtube.com/embed/ID
-export const TUTORIAL_VIDEO_URL = "https://youtube.com/shorts/tdIbl3GWmmE";
+export const TUTORIAL_VIDEO_URL = "https://youtube.com/shorts/sFk0WwnfmMA";
 
 const C = {
   panel: "#161a18",
