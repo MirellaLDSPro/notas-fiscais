@@ -2,15 +2,15 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { getDictionary } from "@/lib/dictionaries";
-import LandingPage from "./LandingPage";
+import LandingPage from "../LandingPage";
 
-const dict = getDictionary("pt");
+const dict = getDictionary("en");
 
 export const metadata: Metadata = {
   title: dict.meta.title,
   description: dict.meta.description,
   alternates: {
-    canonical: "/",
+    canonical: "/en",
     languages: {
       "pt-BR": "/",
       en: "/en",
@@ -18,9 +18,9 @@ export const metadata: Metadata = {
   },
 };
 
-export default async function Home() {
+export default async function HomeEn() {
   const session = await auth();
   if (session?.user) redirect("/dashboard");
 
-  return <LandingPage dict={dict} locale="pt" />;
+  return <LandingPage dict={dict} locale="en" />;
 }

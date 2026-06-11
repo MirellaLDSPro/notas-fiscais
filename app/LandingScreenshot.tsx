@@ -12,13 +12,33 @@ const C = {
   accent: "#d4ff4f",
 };
 
+type Labels = {
+  expandLabel: string;
+  expandBadge: string;
+  enlargedDialogLabel: string;
+  closeLabel: string;
+};
+
+const DEFAULT_LABELS: Labels = {
+  expandLabel: "Expandir screenshot do painel",
+  expandBadge: "Expandir",
+  enlargedDialogLabel: "Screenshot ampliado do painel",
+  closeLabel: "Fechar",
+};
+
 type Props = {
   src: string;
   alt: string;
   url?: string;
+  labels?: Labels;
 };
 
-export default function LandingScreenshot({ src, alt, url }: Props) {
+export default function LandingScreenshot({
+  src,
+  alt,
+  url,
+  labels = DEFAULT_LABELS,
+}: Props) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -40,7 +60,7 @@ export default function LandingScreenshot({ src, alt, url }: Props) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        aria-label="Expandir screenshot do painel"
+        aria-label={labels.expandLabel}
         style={{
           position: "relative",
           background: C.panel,
@@ -87,7 +107,7 @@ export default function LandingScreenshot({ src, alt, url }: Props) {
               borderRadius: 6,
             }}
           >
-            Expandir
+            {labels.expandBadge}
           </span>
         </div>
         <div
@@ -116,7 +136,7 @@ export default function LandingScreenshot({ src, alt, url }: Props) {
           onClick={() => setOpen(false)}
           role="dialog"
           aria-modal="true"
-          aria-label="Screenshot ampliado do painel"
+          aria-label={labels.enlargedDialogLabel}
           style={{
             position: "fixed",
             inset: 0,
@@ -166,7 +186,7 @@ export default function LandingScreenshot({ src, alt, url }: Props) {
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                aria-label="Fechar"
+                aria-label={labels.closeLabel}
                 style={{
                   background: "transparent",
                   border: `1px solid ${C.line}`,
