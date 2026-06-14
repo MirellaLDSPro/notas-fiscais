@@ -157,7 +157,7 @@ async function initSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS parsed_partial JSONB
   `;
 
-  -- audit table for manual transfers of nota ownership
+  // audit table for manual transfers of nota ownership
   await sql()`
     CREATE TABLE IF NOT EXISTS nota_transfers (
       id BIGSERIAL PRIMARY KEY,
