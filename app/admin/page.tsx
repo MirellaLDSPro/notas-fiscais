@@ -11,6 +11,9 @@ import {
   setUserFlag,
 } from "@/lib/db";
 
+// client components
+import TransferNotaModal from "@/components/TransferNotaModal";
+
 export const dynamic = "force-dynamic";
 
 const C = {
@@ -335,7 +338,7 @@ export default async function AdminPage({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1fr) auto",
+              gridTemplateColumns: "minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1fr) auto auto",
               gap: 0,
               fontSize: 11,
               fontFamily: "monospace",
@@ -350,6 +353,7 @@ export default async function AdminPage({
             <div>Emitente · Nº</div>
             <div style={{ textAlign: "right" }}>Valor</div>
             <div style={{ width: 130, textAlign: "right" }}>Quando</div>
+            <div style={{ width: 110, textAlign: "right" }}>Ação</div>
           </div>
           {activity.length === 0 && (
             <div style={{ padding: 22, color: C.muted, fontSize: 13, textAlign: "center" }}>
@@ -361,7 +365,7 @@ export default async function AdminPage({
               key={a.notaId}
               style={{
                 display: "grid",
-                gridTemplateColumns: "minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1fr) auto",
+                gridTemplateColumns: "minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1fr) auto auto",
                 gap: 0,
                 alignItems: "center",
                 padding: "10px 14px",
@@ -388,6 +392,11 @@ export default async function AdminPage({
                 }}
               >
                 {a.createdAt.slice(0, 16).replace("T", " ")}
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", width: 110 }}>
+                {/* Transfer button for admins */}
+                {/* @ts-ignore-next-line */}
+                <TransferNotaModal notaId={a.notaId} ownerEmail={a.userEmail} />
               </div>
             </div>
           ))}
