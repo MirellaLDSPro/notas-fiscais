@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "NODE_OPTIONS='--max-old-space-size=8192' next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test:e2e": "npx playwright test --reporter=html --output=playwright-report"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",
