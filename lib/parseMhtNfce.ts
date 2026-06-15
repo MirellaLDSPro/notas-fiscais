@@ -41,7 +41,7 @@ function decodeQuotedPrintable(s: string): Buffer {
   return Buffer.from(out);
 }
 
-function extractHtmlPart(buffer: Buffer): string {
+export function extractHtmlPart(buffer: Buffer): string {
   const raw = buffer.toString("binary");
   const headerEnd = (() => {
     const a = raw.indexOf("\r\n\r\n");

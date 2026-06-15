@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { auth, userIdFromSession } from "@/auth";
 import { NotaParseError, parseNfcePdf } from "@/lib/parseNfce";
-import { parseMhtNfceBuffer } from "@/lib/parseMhtNfce";
+import { extractHtmlPart, parseMhtNfceBuffer } from "@/lib/parseMhtNfce";
 import { parseXlsxBuffer } from "@/lib/parseXlsx";
 import { parseNfpCsvBuffer } from "@/lib/parseNfpCsv";
-import { parseNfceViaClaude } from "@/lib/ocrNfce";
+import { parseNfceTextViaClaude, parseNfceViaClaude } from "@/lib/ocrNfce";
 import {
   recordNotaErro,
   upsertEstabelecimento,
@@ -103,18 +103,24 @@ export async function POST(request: Request) {
 
         // Attempt Claude fallback for any supported file type
         const ext = name.toLowerCase().split('.').pop() || '';
-        const supportedExts = ['pdf','mht','mhtml','xlsx','xls','csv'];
+        const supportedExts = ['pdf','mht','mhtml'];
         if (supportedExts.includes(ext)) {
-          const mediaMap: Record<string,string> = {
-            pdf: 'application/pdf',
-            mht: 'text/html',
-            mhtml: 'text/html',
-            xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            xls: 'application/vnd.ms-excel',
-            csv: 'text/csv',
-          };
-          const mediaType = mediaMap[ext] ?? 'application/octet-stream';
-          const claude = await parseNfceViaClaude(buf, mediaType);
+          let claude;
+          if (ext === 'mht' || ext === 'mhtml') {
+            // A Anthropic só aceita PDF em document blocks; extraímos o HTML do
+            // MHT e enviamos como texto.
+            let html: string | null = null;
+            try {
+              html = extractHtmlPart(buf);
+            } catch (extractErr) {
+              console.error(`[upload] extração de HTML do MHT falhou para ${name}:`, extractErr);
+            }
+            claude = html
+              ? await parseNfceTextViaClaude(html)
+              : { ok: false as const, partial: { numero: null, chave_acesso: null, emitente: null, cnpj: null, data_emissao: null, valor_total: null, itens_count: 0 } };
+          } else {
+            claude = await parseNfceViaClaude(buf, 'application/pdf');
+          }
           if (claude.ok) {
             try {
               const res = await upsertNota(userId, claude.nota);
