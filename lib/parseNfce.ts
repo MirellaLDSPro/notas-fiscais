@@ -1,4 +1,3 @@
-import { PDFParse } from "pdf-parse";
 import type { ParsedNota } from "./db";
 
 export type NotaParseHint = {
@@ -51,13 +50,21 @@ export function parseEnderecoPdf(line: string): EnderecoPdf | null {
 }
 
 export async function parseNfcePdf(buffer: Buffer): Promise<ParsedNota> {
-  const parser = new PDFParse({ data: new Uint8Array(buffer) });
+  // dynamically import pdf-parse to avoid loading browser-dependent modules at build time
+  const mod: any = await import("pdf-parse").catch((e) => {
+    throw new NotaParseError("Falha ao carregar parser de PDF: " + String(e));
+  });
+  // pdf-parse may export a class or a default; try to obtain a constructor/function
+  const PDFParseCtor = (mod && (mod.PDFParse || mod.default || mod)) as any;
+  if (!PDFParseCtor) throw new NotaParseError("Parser de PDF não disponível");
+
+  const parser = new PDFParseCtor({ data: new Uint8Array(buffer) });
   let text: string;
   try {
     const res = await parser.getText();
     text = res.text;
   } finally {
-    await parser.destroy();
+    if (typeof parser.destroy === "function") await parser.destroy();
   }
 
   if (/Cupom Fiscal Eletrônico SAT|CUPOM FISCAL ELETRÔNICO\s*-\s*SAT/i.test(text)) {
