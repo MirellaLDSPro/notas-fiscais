@@ -7,7 +7,8 @@ export const runtime = "nodejs";
 export async function PATCH(request: Request, { params }: { params: { id?: string } }) {
   try {
     const { userId: adminUserId } = await requireAdmin();
-    const idRaw = params?.id;
+    // attempt to get id from params, fallback to parsing URL if framework did not populate params
+    let idRaw = params?.id;
 
     // read raw body for debugging and parsing safely
     let rawBody = "";
@@ -21,6 +22,16 @@ export async function PATCH(request: Request, { params }: { params: { id?: strin
       body = rawBody ? JSON.parse(rawBody) : {};
     } catch (e) {
       body = {};
+    }
+
+    if (!idRaw) {
+      try {
+        const url = new URL(String(request.url));
+        const m = url.pathname.match(/\/api\/admin\/notas\/([^\/]+)\/transfer/);
+        if (m) idRaw = m[1];
+      } catch (e) {
+        // ignore
+      }
     }
 
     const notaId = Number(idRaw);
