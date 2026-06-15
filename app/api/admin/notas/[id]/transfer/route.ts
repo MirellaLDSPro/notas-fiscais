@@ -38,10 +38,10 @@ export async function PATCH(request: Request, { params }: { params: { id?: strin
     }
 
     const result = await transferNota(notaId, toUserId, adminUserId, reason);
-    if (result === "not_found") return NextResponse.json({ error: "Nota não encontrada" }, { status: 404 });
-    if (result === "no_change") return NextResponse.json({ status: "no_change" });
+    if (result === 'not_found') return NextResponse.json({ error: 'Nota não encontrada' }, { status: 404 });
+    if (result === 'no_change') return NextResponse.json({ status: 'no_change' });
 
-    return NextResponse.json({ status: "transferred" });
+    return NextResponse.json({ status: 'transferred' });
   } catch (err) {
     console.error("[admin/transfer] erro:", err);
     return NextResponse.json({ error: err instanceof Error ? err.message : "erro interno" }, { status: 500 });
