@@ -7,23 +7,8 @@ export const runtime = "nodejs";
 export async function PATCH(request: Request, { params }: { params: { id?: string } }) {
   try {
     const { userId: adminUserId } = await requireAdmin();
-    // attempt to get id from params, fallback to parsing URL if framework did not populate params
+    // resolve nota id from params or URL (robust to routing differences)
     let idRaw = params?.id;
-
-    // read raw body for debugging and parsing safely
-    let rawBody = "";
-    try {
-      rawBody = await request.text();
-    } catch (e) {
-      rawBody = "";
-    }
-    let body: any = {};
-    try {
-      body = rawBody ? JSON.parse(rawBody) : {};
-    } catch (e) {
-      body = {};
-    }
-
     if (!idRaw) {
       try {
         const url = new URL(String(request.url));
@@ -36,10 +21,10 @@ export async function PATCH(request: Request, { params }: { params: { id?: strin
 
     const notaId = Number(idRaw);
     if (!Number.isFinite(notaId) || notaId <= 0) {
-      console.error("[admin/transfer] invalid nota id", { paramsId: idRaw, paramsType: typeof idRaw, rawBody, url: String(request.url), host: request.headers.get('host') });
-      return NextResponse.json({ error: "nota id inválido", debug: { paramsId: idRaw, paramsType: typeof idRaw, rawBody, url: String(request.url), host: request.headers.get('host') } }, { status: 400 });
+      return NextResponse.json({ error: "nota id inválido" }, { status: 400 });
     }
 
+    const body = await request.json().catch(() => ({}));
     const toUserIdRaw = body.toUserId;
     const toUserEmailRaw = body.toUserEmail;
     const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 1000) : null;
