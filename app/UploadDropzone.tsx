@@ -15,7 +15,7 @@ type Summary = {
 };
 type UploadResult = {
   name: string;
-  status: "ok" | "error";
+  status: "ok" | "error" | "queued";
   fonte?: string;
   notas?: Summary[];
   error?: string;
@@ -46,23 +46,38 @@ export default function UploadDropzone() {
 
   const sendFiles = async (files: FileList | File[]) => {
     const arr = Array.from(files);
-    if (!arr.length || busy) return;
+    if (!arr.length) return;
+    // show queued placeholders immediately so UI isn't blocked
+    setResults((prev) => [
+      ...arr.map((f) => ({ name: f.name, status: "queued" } as UploadResult)),
+      ...prev,
+    ]);
+    // keep a busy flag for background activity but don't block the UI controls
     setBusy(true);
-    setResults([]);
     try {
       const form = new FormData();
       for (const f of arr) form.append("file", f);
       const res = await fetch("/api/upload", { method: "POST", body: form });
       const data = (await res.json()) as { results?: UploadResult[]; error?: string };
       if (data.results) {
-        setResults(data.results);
+        setResults((prev) => {
+          // remove queued placeholders for returned files
+          const remainingQueued = prev.filter(
+            (r) => r.status === "queued" && !data.results!.some((dr) => dr.name === r.name)
+          );
+          return [...data.results!, ...remainingQueued, ...prev.filter((r) => r.status !== "queued")];
+        });
         if (data.results.some((r) => r.status === "ok")) router.refresh();
       } else {
-        setResults([{ name: "—", status: "error", error: data.error ?? "Erro." }]);
+        setResults((prev) => [
+          { name: "—", status: "error", error: data.error ?? "Erro." },
+          ...prev.filter((r) => r.status !== "queued"),
+        ]);
       }
     } catch (err) {
-      setResults([
+      setResults((prev) => [
         { name: "—", status: "error", error: err instanceof Error ? err.message : "Erro." },
+        ...prev.filter((r) => r.status !== "queued"),
       ]);
     } finally {
       setBusy(false);
@@ -108,7 +123,7 @@ export default function UploadDropzone() {
           borderRadius: 12,
           padding: "28px 14px",
           textAlign: "center",
-          cursor: busy ? "wait" : "pointer",
+          cursor: "pointer",
           transition: "all .15s ease",
         }}
       >
@@ -118,11 +133,10 @@ export default function UploadDropzone() {
           accept="application/pdf,.pdf,.mht,.mhtml,multipart/related,message/rfc822,.xlsx,.xls,.csv"
           multiple
           hidden
-          disabled={busy}
           onChange={(e) => e.target.files && sendFiles(e.target.files)}
         />
         <div style={{ fontSize: 14, color: C.ink, marginBottom: 4 }}>
-          {busy ? "Processando…" : "Solte aqui ou clique para selecionar"}
+          {results.some((r) => r.status === "queued") ? "Enfileirada…" : busy ? "Processando…" : "Solte aqui ou clique para selecionar"}
         </div>
         <div style={{ fontSize: 11, color: C.muted, fontFamily: "monospace" }}>
           PDF · MHT (página salva) · XLSX · CSV
@@ -142,9 +156,15 @@ export default function UploadDropzone() {
             const tag =
               r.status !== "ok"
                 ? "× erro"
-                : allSkipped
-                  ? `• ${skipped.length} já existia${skipped.length === 1 ? "" : "m"}`
-                  : `✓ ${inserted.length} nova${inserted.length === 1 ? "" : "s"}${skipped.length ? ` · ${skipped.length} ignorada${skipped.length === 1 ? "" : "s"}` : ""}`;
+                if (r.status === "queued") {
+                  tag = "• enfileirada";
+                } else if (r.status !== "ok") {
+                  tag = "× erro";
+                } else if (allSkipped) {
+                  tag = `• ${skipped.length} já existia${skipped.length === 1 ? "" : "m"}`;
+                } else {
+                  tag = `✓ ${inserted.length} nova${inserted.length === 1 ? "" : "s"}${skipped.length ? ` · ${skipped.length} ignorada${skipped.length === 1 ? "" : "s"}` : ""}`;
+                }
             return (
               <div
                 key={i}
