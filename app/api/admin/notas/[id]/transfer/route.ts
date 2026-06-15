@@ -25,8 +25,8 @@ export async function PATCH(request: Request, { params }: { params: { id?: strin
 
     const notaId = Number(idRaw);
     if (!Number.isFinite(notaId) || notaId <= 0) {
-      console.error("[admin/transfer] invalid nota id", { paramsId: idRaw, paramsType: typeof idRaw, rawBody });
-      return NextResponse.json({ error: "nota id inválido", debug: { paramsId: idRaw, paramsType: typeof idRaw, rawBody } }, { status: 400 });
+      console.error("[admin/transfer] invalid nota id", { paramsId: idRaw, paramsType: typeof idRaw, rawBody, url: String(request.url), host: request.headers.get('host') });
+      return NextResponse.json({ error: "nota id inválido", debug: { paramsId: idRaw, paramsType: typeof idRaw, rawBody, url: String(request.url), host: request.headers.get('host') } }, { status: 400 });
     }
 
     const toUserIdRaw = body.toUserId;
