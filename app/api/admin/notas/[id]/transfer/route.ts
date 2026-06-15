@@ -1,14 +1,18 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { requireAdmin } from "@/auth";
 import { ensureUserByEmail, getUserById, transferNota } from "@/lib/db";
 
 export const runtime = "nodejs";
 
-export async function PATCH(request: Request, { params }: { params: { id?: string } }) {
+export async function PATCH(
+  request: NextRequest,
+  ctx: RouteContext<"/api/admin/notas/[id]/transfer">
+) {
   try {
     const { userId: adminUserId } = await requireAdmin();
+    const { id } = await ctx.params;
     // resolve nota id from params or URL (robust to routing differences)
-    let idRaw = params?.id;
+    let idRaw: string | undefined = id;
     if (!idRaw) {
       try {
         const url = new URL(String(request.url));
