@@ -31,11 +31,13 @@ jobs:
           npx playwright install --with-deps
 
       - name: Build and start app
+        env:
+          NEXTAUTH_URL: "http://localhost:3000"
         run: |
           cd dashboard-app
           npm run build
           # Start Next.js in background
-          npm run start &
+          NEXTAUTH_URL=http://localhost:3000 npm run start &
           # wait for server to be ready
           n=0
           until curl -sSf http://localhost:3000 || [ $n -ge 60 ]; do
