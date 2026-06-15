@@ -8,12 +8,27 @@ export async function PATCH(request: Request, { params }: { params: { id?: strin
   try {
     const { userId: adminUserId } = await requireAdmin();
     const idRaw = params?.id;
-    const notaId = Number(idRaw);
-    if (!Number.isFinite(notaId) || notaId <= 0) {
-      return NextResponse.json({ error: "nota id inválido" }, { status: 400 });
+
+    // read raw body for debugging and parsing safely
+    let rawBody = "";
+    try {
+      rawBody = await request.text();
+    } catch (e) {
+      rawBody = "";
+    }
+    let body: any = {};
+    try {
+      body = rawBody ? JSON.parse(rawBody) : {};
+    } catch (e) {
+      body = {};
     }
 
-    const body = await request.json().catch(() => ({}));
+    const notaId = Number(idRaw);
+    if (!Number.isFinite(notaId) || notaId <= 0) {
+      console.error("[admin/transfer] invalid nota id", { paramsId: idRaw, paramsType: typeof idRaw, rawBody });
+      return NextResponse.json({ error: "nota id inválido", debug: { paramsId: idRaw, paramsType: typeof idRaw, rawBody } }, { status: 400 });
+    }
+
     const toUserIdRaw = body.toUserId;
     const toUserEmailRaw = body.toUserEmail;
     const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 1000) : null;
