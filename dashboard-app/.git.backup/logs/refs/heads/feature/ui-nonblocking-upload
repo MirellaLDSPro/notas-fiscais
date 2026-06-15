@@ -1,0 +1,3 @@
+0000000000000000000000000000000000000000 9bf498f3df6322254a22467bfb4ff7e4babb2493 Mirella Lins <mirella.lins@mercos.com> 1781530116 -0300	branch: Created from HEAD
+9bf498f3df6322254a22467bfb4ff7e4babb2493 1462446db0822ceec5fffcc3ab4cd8820962a7a8 Mirella Lins <mirella.lins@mercos.com> 1781530116 -0300	commit: ui: make upload UI non-blocking (queued state)
+1462446db0822ceec5fffcc3ab4cd8820962a7a8 3be6b4426a712a296763d3f26d6ed755721ed533 Mirella Lins <mirella.lins@mercos.com> 1781530273 -0300	pull --rebase origin feature/ui-nonblocking-upload (finish): refs/heads/feature/ui-nonblocking-upload onto ba92dd17f071bb2f7da8e924452f7072ce799079

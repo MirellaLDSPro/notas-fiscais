@@ -1,0 +1,30 @@
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = false
+	logallrefupdates = true
+	ignorecase = true
+	precomposeunicode = true
+[remote "origin"]
+	url = https://github.com/MirellaLDSPro/notas-fiscais.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+[branch "main"]
+	remote = origin
+	merge = refs/heads/main
+	vscode-merge-base = origin/main
+[branch "feat/per-user-receitas-toggle"]
+	remote = origin
+	vscode-merge-base = origin/main
+	merge = refs/heads/feat/per-user-receitas-toggle
+[branch "feat/i18n"]
+	vscode-merge-base = origin/feat/per-user-receitas-toggle
+	remote = origin
+	merge = refs/heads/feat/i18n
+[branch "feature/admin-transfer-note"]
+	vscode-merge-base = origin/main
+	remote = origin
+	merge = refs/heads/feature/admin-transfer-note
+[branch "feature/ui-nonblocking-upload"]
+	vscode-merge-base = origin/feature/admin-transfer-note
+	remote = origin
+	merge = refs/heads/feature/ui-nonblocking-upload
