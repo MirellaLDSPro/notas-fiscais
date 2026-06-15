@@ -1,10 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/auth";
 import { ensureUserByEmail, getUserById, transferNota } from "@/lib/db";
 
 export const runtime = "nodejs";
 
-export async function PATCH(request: Request, { params }: { params: { id?: string } }) {
+export const PATCH = async (request: any, context: any) => {
+  const params = context?.params ?? {};
   try {
     const { userId: adminUserId } = await requireAdmin();
     // resolve nota id from params or URL (robust to routing differences)

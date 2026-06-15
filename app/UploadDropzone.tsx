@@ -153,18 +153,17 @@ export default function UploadDropzone() {
             const allSkipped = inserted.length === 0 && skipped.length > 0;
             const color =
               r.status !== "ok" ? C.warn : allSkipped ? C.muted : C.accent2;
-            const tag =
-              r.status !== "ok"
-                ? "× erro"
-                if (r.status === "queued") {
-                  tag = "• enfileirada";
-                } else if (r.status !== "ok") {
-                  tag = "× erro";
-                } else if (allSkipped) {
-                  tag = `• ${skipped.length} já existia${skipped.length === 1 ? "" : "m"}`;
-                } else {
-                  tag = `✓ ${inserted.length} nova${inserted.length === 1 ? "" : "s"}${skipped.length ? ` · ${skipped.length} ignorada${skipped.length === 1 ? "" : "s"}` : ""}`;
-                }
+            const tag = (() => {
+              if (r.status === "queued") {
+                return "• enfileirada";
+              } else if (r.status !== "ok") {
+                return "× erro";
+              } else if (allSkipped) {
+                return `• ${skipped.length} já existia${skipped.length === 1 ? "" : "m"}`;
+              } else {
+                return `✓ ${inserted.length} nova${inserted.length === 1 ? "" : "s"}${skipped.length ? ` · ${skipped.length} ignorada${skipped.length === 1 ? "" : "s"}` : ""}`;
+              }
+            })();
             return (
               <div
                 key={i}
