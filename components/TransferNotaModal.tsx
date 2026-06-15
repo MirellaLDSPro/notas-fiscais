@@ -18,9 +18,16 @@ export default function TransferNotaModal({ notaId, ownerEmail } : { notaId: num
       setError("Email destino inválido");
       return;
     }
+    // validate notaId on client to avoid sending bad requests
+    const nid = Number(notaId);
+    if (!Number.isFinite(nid) || nid <= 0) {
+      setError("nota id inválido (cliente)");
+      return;
+    }
+
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/notas/${notaId}/transfer`, {
+      const res = await fetch(`/api/admin/notas/${nid}/transfer`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ toUserEmail: targetEmail, reason }),
