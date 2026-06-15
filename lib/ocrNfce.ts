@@ -120,47 +120,7 @@ function toPartial(out: ClaudeOutput | null): PartialNotaData {
   };
 }
 
-export async function parseNfceViaClaude(buf: Buffer, mediaType = "application/pdf"): Promise<ClaudeParseResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return { ok: false, partial: EMPTY_PARTIAL };
-
-  let parsed: ClaudeOutput | null = null;
-  try {
-    const client = new Anthropic({ apiKey });
-    const response = await client.messages.parse({
-      model: "claude-haiku-4-5",
-      max_tokens: 4096,
-      system: SYSTEM,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "document",
-              source: {
-                type: "base64",
-                media_type: mediaType as any,
-                data: buf.toString("base64"),
-              },
-
-            },
-            {
-              type: "text",
-              text: "Extraia todos os campos deste cupom fiscal brasileiro.",
-            },
-          ],
-        },
-      ],
-      output_config: {
-        format: { type: "json_schema", schema: SCHEMA },
-      },
-    });
-    parsed = response.parsed_output as ClaudeOutput | null;
-  } catch (err) {
-    console.error("[parseNfceViaClaude] falha na chamada Claude:", err);
-    return { ok: false, partial: EMPTY_PARTIAL };
-  }
-
+function buildClaudeResult(parsed: ClaudeOutput | null): ClaudeParseResult {
   const partial = toPartial(parsed);
 
   if (
@@ -203,4 +163,56 @@ export async function parseNfceViaClaude(buf: Buffer, mediaType = "application/p
   };
 
   return { ok: true, nota };
+}
+
+async function callClaude(
+  userContent: Array<Record<string, unknown>>
+): Promise<ClaudeOutput | null> {
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const response = await client.messages.parse({
+    model: "claude-haiku-4-5",
+    max_tokens: 4096,
+    system: SYSTEM,
+    messages: [{ role: "user", content: userContent as any }],
+    output_config: {
+      format: { type: "json_schema", schema: SCHEMA },
+    },
+  });
+  return response.parsed_output as ClaudeOutput | null;
+}
+
+export async function parseNfceViaClaude(buf: Buffer, mediaType = "application/pdf"): Promise<ClaudeParseResult> {
+  if (!process.env.ANTHROPIC_API_KEY) return { ok: false, partial: EMPTY_PARTIAL };
+
+  try {
+    const parsed = await callClaude([
+      {
+        type: "document",
+        source: { type: "base64", media_type: mediaType, data: buf.toString("base64") },
+      },
+      { type: "text", text: "Extraia todos os campos deste cupom fiscal brasileiro." },
+    ]);
+    return buildClaudeResult(parsed);
+  } catch (err) {
+    console.error("[parseNfceViaClaude] falha na chamada Claude:", err);
+    return { ok: false, partial: EMPTY_PARTIAL };
+  }
+}
+
+// Variante para conteúdo textual (HTML extraído de MHT, planilhas convertidas, etc).
+// A API da Anthropic só aceita application/pdf em document blocks, então documentos
+// HTML/MHT precisam ir como texto.
+export async function parseNfceTextViaClaude(text: string): Promise<ClaudeParseResult> {
+  if (!process.env.ANTHROPIC_API_KEY) return { ok: false, partial: EMPTY_PARTIAL };
+
+  try {
+    const parsed = await callClaude([
+      { type: "text", text },
+      { type: "text", text: "Acima está o conteúdo de um cupom fiscal brasileiro (NFC-e/SAT) em HTML ou texto. Extraia todos os campos." },
+    ]);
+    return buildClaudeResult(parsed);
+  } catch (err) {
+    console.error("[parseNfceTextViaClaude] falha na chamada Claude:", err);
+    return { ok: false, partial: EMPTY_PARTIAL };
+  }
 }
