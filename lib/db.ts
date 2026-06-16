@@ -156,7 +156,21 @@ async function initSchema(): Promise<void> {
     ALTER TABLE notas_erros
       ADD COLUMN IF NOT EXISTS parsed_partial JSONB
   `;
+
+  // audit table for manual transfers of nota ownership
+  await sql()`
+    CREATE TABLE IF NOT EXISTS nota_transfers (
+      id BIGSERIAL PRIMARY KEY,
+      nota_id BIGINT NOT NULL REFERENCES notas(id) ON DELETE CASCADE,
+      from_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      to_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      transferred_by_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      reason TEXT,
+      created_at TEXT NOT NULL DEFAULT to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS')
+    )
+  `;
 }
+
 
 export async function ensureUserByEmail(
   email: string,
@@ -495,6 +509,34 @@ export async function upsertNota(
   `) as Array<{ id: number }>;
 
   return { id: Number(result[0].id), action: "inserted" };
+}
+
+// transfer ownership of a nota and record audit in nota_transfers
+export async function transferNota(
+  notaId: number,
+  toUserId: number,
+  transferredByUserId: number,
+  reason: string | null = null
+): Promise<"transferred" | "not_found" | "no_change"> {
+  await ready();
+  const rows = (await sql()`SELECT id, user_id FROM notas WHERE id = ${notaId} LIMIT 1`) as Array<{
+    id: number;
+    user_id: number;
+  }>;
+  if (!rows[0]) return "not_found";
+  const fromUserId = Number(rows[0].user_id);
+  if (fromUserId === toUserId) return "no_change";
+
+  await sql()`
+    UPDATE notas SET user_id = ${toUserId} WHERE id = ${notaId}
+  `;
+
+  await sql()`
+    INSERT INTO nota_transfers (nota_id, from_user_id, to_user_id, transferred_by_user_id, reason)
+    VALUES (${notaId}, ${fromUserId}, ${toUserId}, ${transferredByUserId}, ${reason ?? null})
+  `;
+
+  return "transferred";
 }
 
 export type NotaErroInput = {

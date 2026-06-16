@@ -10,6 +10,9 @@ import {
   searchNotasParsedByClaude,
 } from "@/lib/db";
 
+// client components
+import TransferNotaModal from "@/components/TransferNotaModal";
+
 export const dynamic = "force-dynamic";
 
 const C = {
@@ -195,7 +198,7 @@ export default async function AdminErrosPage({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 2fr) minmax(0, 1fr) auto",
+              gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 2fr) minmax(0, 1fr) auto auto",
               gap: 0,
               fontSize: 11,
               fontFamily: "monospace",
@@ -210,6 +213,7 @@ export default async function AdminErrosPage({
             <div>Emitente · Nº · detalhes</div>
             <div style={{ textAlign: "right" }}>Valor</div>
             <div style={{ width: 130, textAlign: "right" }}>Quando</div>
+            <div style={{ width: 110, textAlign: "right" }}>Ação</div>
           </div>
           {claudeNotas.length === 0 && (
             <div style={{ padding: 22, color: C.muted, fontSize: 13, textAlign: "center" }}>
@@ -221,7 +225,7 @@ export default async function AdminErrosPage({
               key={n.id}
               style={{
                 display: "grid",
-                gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 2fr) minmax(0, 1fr) auto",
+                gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 2fr) minmax(0, 1fr) auto auto",
                 gap: 0,
                 alignItems: "center",
                 padding: "12px 14px",
@@ -257,6 +261,12 @@ export default async function AdminErrosPage({
                 }}
               >
                 {n.createdAt.slice(0, 16).replace("T", " ")}
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", width: 110 }}>
+                {/* client component button/modal */}
+                {/* eslint-disable-next-line @next/next/no-typos */}
+                {/* @ts-ignore-next-line */}
+                <TransferNotaModal notaId={n.id} ownerEmail={n.userEmail} />
               </div>
             </div>
           ))}

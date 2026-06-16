@@ -1,0 +1,64 @@
+import { NextResponse, type NextRequest } from "next/server";
+import { requireAdmin } from "@/auth";
+import { ensureUserByEmail, getUserById, transferNota } from "@/lib/db";
+
+export const runtime = "nodejs";
+
+export async function PATCH(
+  request: NextRequest,
+  ctx: RouteContext<"/api/admin/notas/[id]/transfer">
+) {
+  try {
+    const { userId: adminUserId } = await requireAdmin();
+    const { id } = await ctx.params;
+    // resolve nota id from params or URL (robust to routing differences)
+    let idRaw: string | undefined = id;
+    if (!idRaw) {
+      try {
+        const url = new URL(String(request.url));
+        const m = url.pathname.match(/\/api\/admin\/notas\/([^\/]+)\/transfer/);
+        if (m) idRaw = m[1];
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    const notaId = Number(idRaw);
+    if (!Number.isFinite(notaId) || notaId <= 0) {
+      return NextResponse.json({ error: "nota id inválido" }, { status: 400 });
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const toUserIdRaw = body.toUserId;
+    const toUserEmailRaw = body.toUserEmail;
+    const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 1000) : null;
+
+    let toUserId: number | null = null;
+    if (toUserIdRaw) {
+      const candidate = Number(toUserIdRaw);
+      if (!Number.isFinite(candidate) || candidate <= 0) {
+        return NextResponse.json({ error: "toUserId inválido" }, { status: 400 });
+      }
+      const u = await getUserById(candidate);
+      if (!u) return NextResponse.json({ error: "Usuário destino não encontrado" }, { status: 404 });
+      toUserId = candidate;
+    } else if (toUserEmailRaw) {
+      const email = String(toUserEmailRaw).trim().toLowerCase();
+      if (!email || !email.includes("@")) {
+        return NextResponse.json({ error: "toUserEmail inválido" }, { status: 400 });
+      }
+      toUserId = await ensureUserByEmail(email, null);
+    } else {
+      return NextResponse.json({ error: "toUserId ou toUserEmail requerido" }, { status: 400 });
+    }
+
+    const result = await transferNota(notaId, toUserId, adminUserId, reason);
+    if (result === 'not_found') return NextResponse.json({ error: 'Nota não encontrada' }, { status: 404 });
+    if (result === 'no_change') return NextResponse.json({ status: 'no_change' });
+
+    return NextResponse.json({ status: 'transferred' });
+  } catch (err) {
+    console.error("[admin/transfer] erro:", err);
+    return NextResponse.json({ error: err instanceof Error ? err.message : "erro interno" }, { status: 500 });
+  }
+}
