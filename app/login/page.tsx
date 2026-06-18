@@ -2,16 +2,28 @@ import { signIn } from "@/auth";
 
 export const dynamic = "force-dynamic";
 
+const LOCAL_AUTH_ENABLED = process.env.LOCAL_AUTH === "1";
+
 export default async function LoginPage({
   searchParams,
 }: {
   searchParams: Promise<{ from?: string; error?: string }>;
 }) {
   const { from, error } = await searchParams;
+  const redirectTo = from || "/dashboard";
 
   async function login() {
     "use server";
-    await signIn("google", { redirectTo: from || "/dashboard" });
+    await signIn("google", { redirectTo });
+  }
+
+  async function loginLocal(formData: FormData) {
+    "use server";
+    await signIn("local", {
+      email: formData.get("email"),
+      password: formData.get("password"),
+      redirectTo,
+    });
   }
 
   return (
@@ -70,10 +82,84 @@ export default async function LoginPage({
             Entrar com Google
           </button>
         </form>
+        {LOCAL_AUTH_ENABLED && (
+          <>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                margin: "20px 0",
+                color: "#525252",
+                fontSize: 12,
+              }}
+            >
+              <div style={{ flex: 1, height: 1, background: "#262626" }} />
+              <span>OU LOGIN LOCAL</span>
+              <div style={{ flex: 1, height: 1, background: "#262626" }} />
+            </div>
+            <form action={loginLocal}>
+              <input
+                type="email"
+                name="email"
+                placeholder="email"
+                autoComplete="username"
+                required
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  marginBottom: 8,
+                  fontSize: 14,
+                  background: "#0a0a0a",
+                  color: "#fafafa",
+                  border: "1px solid #262626",
+                  borderRadius: 6,
+                  boxSizing: "border-box",
+                }}
+              />
+              <input
+                type="password"
+                name="password"
+                placeholder="senha"
+                autoComplete="current-password"
+                required
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  marginBottom: 12,
+                  fontSize: 14,
+                  background: "#0a0a0a",
+                  color: "#fafafa",
+                  border: "1px solid #262626",
+                  borderRadius: 6,
+                  boxSizing: "border-box",
+                }}
+              />
+              <button
+                type="submit"
+                style={{
+                  width: "100%",
+                  padding: "10px 16px",
+                  fontSize: 14,
+                  fontWeight: 500,
+                  background: "transparent",
+                  color: "#fafafa",
+                  border: "1px solid #404040",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                }}
+              >
+                Entrar (dev)
+              </button>
+            </form>
+          </>
+        )}
         {error && (
           <p style={{ marginTop: 16, color: "#f87171", fontSize: 13 }}>
             {error === "AccessDenied"
               ? "Email não autorizado."
+              : error === "CredentialsSignin"
+              ? "Email ou senha inválidos."
               : "Falha no login. Tente novamente."}
           </p>
         )}
