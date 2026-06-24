@@ -25,7 +25,17 @@ Quando o cliente fornecer o QR (scan no celular) ou colar a URL/chave (desktop),
 ## Decisões de arquitetura
 
 ### Por que busca no servidor (e não no cliente)
-A observação do captcha é **por IP**. Buscar no browser do cliente gastaria o orçamento por-IP de cada usuário (ideal), mas o **CORS bloqueia** a leitura da resposta cross-origin do portal SEFAZ — tecnicamente inviável num web app. Logo, a busca é **server-side**. Mitigações para o orçamento de captcha compartilhado dos IPs da Vercel:
+A observação do captcha é **por IP**. Buscar no browser do cliente gastaria o orçamento por-IP de cada usuário (ideal), em vez de queimar os IPs compartilhados da Vercel. Mesmo assim, a busca é **server-side**, pela razão abaixo.
+
+Convém separar **buscar** (rede) de **parsear** (string):
+- **O parse é portável pro cliente.** `parseNfceHtml(html)` é regex puro sobre string (o `Buffer` está só no `extractHtmlPart`/`decodeQuotedPrintable`, específicos do MHT). Rodaria no browser sem problema — o parse nunca foi o gargalo.
+- **A busca não é portável.** O browser até dispara o `fetch` para o portal, mas **bloqueia o JS de ler o corpo** porque a resposta não traz `Access-Control-Allow-Origin` para o nosso domínio. CORS é enforced pelo browser; não há como configurar do nosso lado. Os contornos também morrem: `mode: 'no-cors'` devolve resposta opaca (corpo inacessível); `<iframe>`/`window.open` esbarram na same-origin policy (não lemos o DOM cross-origin, e gov costuma mandar `X-Frame-Options`).
+
+Como sem o HTML no cliente o parse client-side não tem o que parsear, e o **fallback de IA** (`parseNfceTextViaClaude`) precisaria continuar no servidor de qualquer modo (a API key não vai pro browser), não há ganho em separar: o fetch e o parse ficam ambos no servidor.
+
+Os únicos caminhos que de fato leem a página com o IP do usuário são **extensão de browser** (content script com `host_permissions` fura o CORS) ou **app nativo/WebView** (HTTP nativo ignora CORS) — ambos saltos de escopo fora do v1. A única incógnita que reabriria o client-side seria a SEFAZ-SP passar a devolver `Access-Control-Allow-Origin` permissivo nessa página (raríssimo em portal gov; ~99% que não), o que é barato de checar olhando os headers da resposta.
+
+Mitigações para o orçamento de captcha compartilhado dos IPs da Vercel:
 - **Dedup por `chave_acesso`**: se o usuário já tem a nota, devolve sem buscar.
 - **Sem retry** quando captcha é detectado (retry só queima orçamento).
 - Busca apenas sob ação explícita do cliente (scan/colar), nunca em background.
