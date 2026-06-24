@@ -16,8 +16,10 @@ const C = {
 
 const NFCE_URL_RE = /^https?:\/\/[^/]*(fazenda|sefaz)[^/]*\.gov\.br/i;
 
-export default function QrScanButton() {
+export default function QrScanButton({ onDetect }: { onDetect: (url: string) => void }) {
   const [open, setOpen] = useState(false);
+  const onDetectRef = useRef(onDetect);
+  onDetectRef.current = onDetect;
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -34,7 +36,7 @@ export default function QrScanButton() {
         const url = result.data.trim();
         if (NFCE_URL_RE.test(url)) {
           scanner.stop();
-          window.open(url, "_blank", "noopener,noreferrer");
+          onDetectRef.current(url);
           setOpen(false);
         } else {
           setError(`QR não parece ser de NFC-e. Conteúdo: ${url.slice(0, 60)}${url.length > 60 ? "…" : ""}`);
@@ -240,7 +242,7 @@ export default function QrScanButton() {
                 borderTop: `1px solid ${C.line}`,
               }}
             >
-              Ao detectar, a página da Fazenda abre em uma nova aba.
+              Ao detectar, busco a nota automaticamente.
             </div>
           </div>
         </div>
