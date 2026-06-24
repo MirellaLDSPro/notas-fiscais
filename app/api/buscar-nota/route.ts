@@ -1,0 +1,151 @@
+import { NextResponse } from "next/server";
+import { createHash } from "node:crypto";
+import { auth, userIdFromSession } from "@/auth";
+import { NotaParseError } from "@/lib/parseNfce";
+import { parseNfceHtml } from "@/lib/parseMhtNfce";
+import { parseNfceTextViaClaude } from "@/lib/ocrNfce";
+import { extrairChave, buscarHtml } from "@/lib/portais/sp";
+import {
+  notaExistsByChave,
+  upsertNota,
+  upsertEstabelecimento,
+  recordNotaErro,
+  type ParsedNota,
+} from "@/lib/db";
+
+export const runtime = "nodejs";
+
+async function safeRecordErro(
+  userId: number,
+  chave: string,
+  erro: string,
+  numero: string | null = null
+) {
+  try {
+    await recordNotaErro(userId, {
+      nome_arquivo: `busca:${chave}`,
+      erro,
+      numero,
+      chave_acesso: chave,
+      file_sha256: createHash("sha256").update(chave).digest("hex"),
+      parsed_partial: null,
+    });
+  } catch (e) {
+    console.error("[buscar-nota] recordNotaErro falhou:", e);
+  }
+}
+
+export async function POST(request: Request) {
+  const userId = userIdFromSession(await auth());
+  if (!userId) {
+    return NextResponse.json({ status: "invalid", message: "Não autenticado." }, { status: 401 });
+  }
+
+  let input = "";
+  try {
+    const body = (await request.json()) as { input?: unknown };
+    if (typeof body?.input === "string") input = body.input;
+  } catch {
+    /* corpo inválido cai no check abaixo */
+  }
+  if (!input.trim()) {
+    return NextResponse.json(
+      { status: "invalid", message: "Informe a URL ou a chave da nota." },
+      { status: 400 }
+    );
+  }
+
+  const resolved = extrairChave(input);
+  if (!resolved) {
+    return NextResponse.json({
+      status: "invalid",
+      message: "Não reconheci uma NFC-e válida nesse QR/chave.",
+    });
+  }
+  if (resolved.uf !== "35" || !resolved.url) {
+    return NextResponse.json({
+      status: "unsupported_uf",
+      uf: resolved.uf,
+      message: "Por enquanto a busca automática cobre só São Paulo. Use o envio de arquivo.",
+    });
+  }
+
+  if (await notaExistsByChave(userId, resolved.chave)) {
+    return NextResponse.json({
+      status: "ok",
+      action: "exists",
+      fonte: "BUSCA",
+      nota: { chave_acesso: resolved.chave },
+    });
+  }
+
+  const fetched = await buscarHtml(resolved.url);
+  if (!fetched.ok) {
+    if (fetched.captcha) {
+      return NextResponse.json({
+        status: "captcha",
+        url: resolved.url,
+        message: "O site da Fazenda pediu captcha. Abra a nota e envie o arquivo.",
+      });
+    }
+    await safeRecordErro(userId, resolved.chave, fetched.erro ?? "Falha na busca");
+    return NextResponse.json({
+      status: "error",
+      url: resolved.url,
+      message: "Não consegui buscar a nota agora. Tente o envio de arquivo.",
+    });
+  }
+
+  let nota: ParsedNota;
+  let fonte = "BUSCA";
+  try {
+    nota = { ...parseNfceHtml(fetched.html), fonte: "BUSCA" };
+  } catch (err) {
+    const claude = await parseNfceTextViaClaude(fetched.html);
+    if (claude.ok) {
+      nota = claude.nota;
+      fonte = "CLAUDE";
+    } else {
+      const hint = err instanceof NotaParseError ? err.hint : {};
+      await safeRecordErro(
+        userId,
+        resolved.chave,
+        err instanceof Error ? err.message : "Parse falhou",
+        hint.numero ?? null
+      );
+      return NextResponse.json({
+        status: "error",
+        url: resolved.url,
+        message: "Busquei a nota mas não consegui ler os itens. Tente o envio de arquivo.",
+      });
+    }
+  }
+
+  const res = await upsertNota(userId, nota);
+  if (nota.cnpj && nota.endereco) {
+    await upsertEstabelecimento({
+      cnpj: nota.cnpj,
+      razao_social: nota.emitente,
+      logradouro: nota.endereco.logradouro,
+      numero: nota.endereco.numero,
+      complemento: nota.endereco.complemento,
+      bairro: nota.endereco.bairro,
+      municipio: nota.endereco.municipio,
+      uf: nota.endereco.uf,
+      fonte: "PDF",
+    });
+  }
+
+  return NextResponse.json({
+    status: "ok",
+    action: res.action === "inserted" ? "inserted" : "exists",
+    fonte,
+    nota: {
+      numero: nota.numero,
+      emitente: nota.emitente,
+      total: nota.valor_total,
+      itens: nota.itens.length,
+      chave_acesso: nota.chave_acesso,
+    },
+  });
+}
