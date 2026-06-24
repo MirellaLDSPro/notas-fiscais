@@ -52,3 +52,56 @@ export function extrairChave(input: string): ChaveResolvida | null {
     urlSp ?? (!fromUrl && uf === "35" ? `https://www.nfce.fazenda.sp.gov.br/qrcode?p=${chave}` : null);
   return { chave, uf, url };
 }
+
+export type FetchResult =
+  | { ok: true; html: string }
+  | { ok: false; captcha?: true; erro?: string };
+
+const NFCE_MARKER = /NOTA FISCAL DE CONSUMIDOR ELETR[ÔO]NICA|NFC-?e/i;
+const CAPTCHA_MARKER = /captcha|recaptcha|g-recaptcha|hcaptcha|imagem de verifica/i;
+
+export function detectarCaptcha(html: string): boolean {
+  if (CAPTCHA_MARKER.test(html)) return true;
+  if (!NFCE_MARKER.test(html)) return true; // página inesperada → trata como bloqueio
+  return false;
+}
+
+function decodeHtml(buf: Buffer, contentType: string): string {
+  const charset = contentType.match(/charset=([\w-]+)/i)?.[1]?.toLowerCase() ?? "";
+  if (charset.includes("8859") || charset.includes("1252") || charset.includes("latin")) {
+    return new TextDecoder("latin1").decode(buf);
+  }
+  if (!charset) {
+    const head = buf.subarray(0, 1024).toString("latin1");
+    if (/charset=["']?(iso-8859-1|windows-1252)/i.test(head)) {
+      return new TextDecoder("latin1").decode(buf);
+    }
+  }
+  return new TextDecoder("utf-8").decode(buf);
+}
+
+export async function buscarHtml(url: string): Promise<FetchResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      redirect: "follow",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml",
+        "Accept-Language": "pt-BR,pt;q=0.9",
+      },
+    });
+    if (!res.ok) return { ok: false, erro: `HTTP ${res.status}` };
+    const buf = Buffer.from(await res.arrayBuffer());
+    const html = decodeHtml(buf, res.headers.get("content-type") ?? "");
+    if (detectarCaptcha(html)) return { ok: false, captcha: true };
+    return { ok: true, html };
+  } catch (err) {
+    return { ok: false, erro: err instanceof Error ? err.message : "Falha na busca" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
