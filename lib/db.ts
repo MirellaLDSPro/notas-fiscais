@@ -392,7 +392,7 @@ export async function listCnpjsWithoutEstabelecimento(): Promise<string[]> {
   return rows.map((r) => r.cnpj).filter(Boolean);
 }
 
-export type Fonte = "PDF" | "XLSX" | "NFP" | "CLAUDE";
+export type Fonte = "PDF" | "XLSX" | "NFP" | "CLAUDE" | "BUSCA";
 
 export type NotaRow = {
   id: number;
@@ -509,6 +509,16 @@ export async function upsertNota(
   `) as Array<{ id: number }>;
 
   return { id: Number(result[0].id), action: "inserted" };
+}
+
+export async function notaExistsByChave(userId: number, chave: string): Promise<boolean> {
+  await ready();
+  const rows = (await sql()`
+    SELECT 1 FROM notas
+     WHERE user_id = ${userId} AND chave_acesso = ${chave}
+     LIMIT 1
+  `) as Array<{ "?column?": number }>;
+  return rows.length > 0;
 }
 
 // transfer ownership of a nota and record audit in nota_transfers

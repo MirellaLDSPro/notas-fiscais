@@ -113,11 +113,9 @@ const ITEM_FIELD_RE = {
   vt: /class\s*=\s*"[^"]*\bvalor\b[^"]*"[^>]*>([\d.,]+)\s*<\/span>/i,
 };
 
-export function parseMhtNfceBuffer(buffer: Buffer): ParsedNota {
-  const html = extractHtmlPart(buffer);
-
+export function parseNfceHtml(html: string): ParsedNota {
   if (!/NOTA FISCAL DE CONSUMIDOR ELETR[ÔO]NICA|NFC-?e/i.test(html)) {
-    throw new Error("MHT não parece ser de uma NFC-e.");
+    throw new Error("Conteúdo não parece ser de uma NFC-e.");
   }
 
   const emitente = (() => {
@@ -139,8 +137,11 @@ export function parseMhtNfceBuffer(buffer: Buffer): ParsedNota {
 
   const chave = findChaveAcessoHtml(html);
 
+  // Recorta o bloco "Informações gerais" entre "Número:" e "Versão XSLT".
+  // Ancorar em "Número:" (não no status de emissão) cobre notas em contingência
+  // ("EMITIDA EM CONTINGÊNCIA") e outros status além de "EMISSÃO NORMAL".
   const headerText = clean(
-    html.match(/EMISSÃO NORMAL[\s\S]*?Vers[ãa]o XSLT/i)?.[0] ?? ""
+    html.match(/N[úu]mero:[\s\S]*?Vers[ãa]o XSLT/i)?.[0] ?? ""
   );
   // Aceita tanto "Data de Emissão" quanto apenas "Emissão" para maior robustez
   const headerMatch = headerText.match(
@@ -202,4 +203,8 @@ export function parseMhtNfceBuffer(buffer: Buffer): ParsedNota {
     itens,
     endereco,
   };
+}
+
+export function parseMhtNfceBuffer(buffer: Buffer): ParsedNota {
+  return parseNfceHtml(extractHtmlPart(buffer));
 }

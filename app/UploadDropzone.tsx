@@ -23,6 +23,18 @@ type UploadResult = {
   chave_acesso?: string | null;
 };
 
+type BuscaResponse =
+  | {
+      status: "ok";
+      action: "inserted" | "exists";
+      fonte: string;
+      nota: { numero?: string; emitente?: string; total?: number; itens?: number; chave_acesso: string };
+    }
+  | { status: "captcha"; message: string; url: string }
+  | { status: "unsupported_uf"; uf: string; message: string }
+  | { status: "invalid"; message: string }
+  | { status: "error"; message: string; url: string | null };
+
 const C = {
   panel: "#161a18",
   panel2: "#1d2320",
@@ -42,6 +54,7 @@ export default function UploadDropzone() {
   const [drag, setDrag] = useState(false);
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<UploadResult[]>([]);
+  const [fallbackUrl, setFallbackUrl] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const sendFiles = async (files: FileList | File[]) => {
@@ -67,6 +80,51 @@ export default function UploadDropzone() {
     } finally {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = "";
+    }
+  };
+
+  const buscarNota = async (input: string) => {
+    if (!input.trim() || busy) return;
+    setBusy(true);
+    setResults([]);
+    setFallbackUrl(null);
+    try {
+      const res = await fetch("/api/buscar-nota", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ input }),
+      });
+      const data = (await res.json()) as BuscaResponse;
+      if (data.status === "ok") {
+        const inserted = data.action === "inserted";
+        setResults([
+          {
+            name: data.nota.emitente ?? "Nota buscada",
+            status: "ok",
+            fonte: data.fonte,
+            notas: [
+              {
+                numero: data.nota.numero ?? "—",
+                emitente: data.nota.emitente ?? "—",
+                total: data.nota.total ?? 0,
+                itens: data.nota.itens ?? 0,
+                action: inserted ? "inserted" : "skipped",
+                fonte: data.fonte,
+              },
+            ],
+          },
+        ]);
+        router.refresh();
+      } else {
+        setResults([{ name: "Busca automática", status: "error", error: data.message }]);
+        setFallbackUrl("url" in data ? data.url : null);
+      }
+    } catch (err) {
+      setResults([
+        { name: "Busca automática", status: "error", error: err instanceof Error ? err.message : "Erro." },
+      ]);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -129,7 +187,25 @@ export default function UploadDropzone() {
         </div>
       </label>
 
-      <QrScanButton />
+      <QrScanButton onDetect={(url) => buscarNota(url)} />
+
+      <div style={{ marginTop: 10 }}>
+        <label style={{ fontSize: 12, color: C.muted, display: "block", marginBottom: 6 }}>
+          Ou cole a URL do QR Code ou a chave de acesso (44 dígitos):
+        </label>
+        <PasteBuscaField onBuscar={buscarNota} busy={busy} />
+      </div>
+
+      {fallbackUrl && (
+        <a
+          href={fallbackUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ display: "inline-block", marginTop: 10, color: C.accent, fontSize: 12 }}
+        >
+          Abrir no site da Fazenda e baixar o arquivo →
+        </a>
+      )}
 
       {results.length > 0 && (
         <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -195,6 +271,49 @@ export default function UploadDropzone() {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+function PasteBuscaField({ onBuscar, busy }: { onBuscar: (v: string) => void; busy: boolean }) {
+  const [v, setV] = useState("");
+  return (
+    <div style={{ display: "flex", gap: 8 }}>
+      <input
+        value={v}
+        onChange={(e) => setV(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onBuscar(v);
+        }}
+        placeholder="https://www.nfce.fazenda.sp.gov.br/qrcode?p=…  ou  3526…"
+        disabled={busy}
+        style={{
+          flex: 1,
+          background: C.panel2,
+          border: `1px solid ${C.line}`,
+          borderRadius: 8,
+          padding: "8px 10px",
+          color: C.ink,
+          fontSize: 12,
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => onBuscar(v)}
+        disabled={busy}
+        style={{
+          background: C.accent,
+          color: "#0c0f0d",
+          border: "none",
+          borderRadius: 8,
+          padding: "8px 14px",
+          fontSize: 12,
+          fontWeight: 700,
+          cursor: busy ? "wait" : "pointer",
+        }}
+      >
+        Buscar
+      </button>
     </div>
   );
 }
