@@ -134,3 +134,26 @@ QR scan / colar (URL ou 44 dígitos)
 ## Risco a validar (empírico)
 
 Assume-se que a URL **assinada do QR de PE** é buscável server-side **sem captcha**, como ocorre no SP. Isso só se confirma com uma **NFC-e PE real escaneada** (a chave digitada que temos, `2626…2667`, exercita só o caminho "escaneie o QR", não o fetch real). Se PE exigir captcha no QR, o fluxo degrada graciosamente para o upload — mas a busca automática não entregaria para PE. Validar com um cupom PE real, como foi feito para o SP.
+
+---
+
+## Revisão (2026-06-26): PE retorna XML, não HTML
+
+Validamos o risco acima com a URL real do QR de PE (extraída do fixture) e descobrimos:
+
+- ✅ **PE responde server-side sem captcha** (risco resolvido positivamente).
+- ❌ **A URL do QR de PE devolve `text/xml` — o XML cru da NFe**, não a página HTML DANFE. O fixture `nfce-sp.html` era a página **renderizada** (o navegador aplica um XSLT no XML); um `fetch` server-side recebe o XML puro. Logo, `parseNfceHtml` **não lê** a resposta real do PE.
+- SP continua devolvendo **HTML**; PE devolve **XML**.
+
+**Decisão (aprovada):** adicionar um parser de XML da NFe (`parseNfceXml`). O XML é o padrão `nfeProc`/`NFe` 4.00 — estruturado e mais confiável que raspar HTML, e traz `uCom` limpo (esquiva o bug do campo `un`, issue #17). Fixture real salvo em `lib/__tests__/fixtures/nfce-pe.xml` (mesma nota PADARIA/Recife).
+
+### Componente novo: `lib/parseNfceXml.ts`
+- `looksLikeNfeXml(s): boolean` — detecta `<?xml`/`<nfeProc>`/`<NFe>`/`<infNFe>`.
+- `parseNfceXml(xml): ParsedNota` — extrai de: chave (`<infNFe Id="NFe<44>">`), `<ide>` (`nNF`/`serie`/`dhEmi` ISO→`dd/mm/yyyy`), `<emit>` (`xNome`/`CNPJ`/`enderEmit`), `<det><prod>` repetido (`xProd`/`cProd`/`qCom`/`uCom`/`vUnCom`/`vProd`), total (`<ICMSTot><vNF>`). Lança `NotaParseError` sem `nNF`/`dhEmi` ou sem itens.
+
+### Dispatch no `route.ts`
+```ts
+const parsed = looksLikeNfeXml(fetched.html) ? parseNfceXml(fetched.html) : parseNfceHtml(fetched.html);
+nota = { ...parsed, fonte: "BUSCA" };
+```
+O `try/catch` com fallback para Claude permanece. Registro de UF e gate de 3 casos seguem como na seção acima.
