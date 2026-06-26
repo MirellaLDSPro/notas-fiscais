@@ -17,7 +17,7 @@ function tag(xml: string, name: string): string | null {
 }
 
 export function looksLikeNfeXml(s: string): boolean {
-  return /<\?xml|<nfeProc[\s>]|<NFe[\s>]|<infNFe[\s>]/i.test(s);
+  return /<nfeProc[\s>]|<NFe[\s>]|<infNFe[\s>]/i.test(s);
 }
 
 export function parseNfceXml(xml: string): ParsedNota {

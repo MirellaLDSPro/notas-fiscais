@@ -9,6 +9,7 @@ describe("parseNfceXml", () => {
   it("detecta XML da NFe e rejeita HTML", () => {
     expect(looksLikeNfeXml(xml)).toBe(true);
     expect(looksLikeNfeXml("<!DOCTYPE html><html><body>x</body></html>")).toBe(false);
+    expect(looksLikeNfeXml('<?xml version="1.0"?><rss><channel/></rss>')).toBe(false);
   });
 
   it("extrai os campos da NFC-e PE (XML real)", () => {
@@ -29,5 +30,10 @@ describe("parseNfceXml", () => {
 
   it("lança em XML sem itens", () => {
     expect(() => parseNfceXml("<nfeProc><NFe><infNFe Id=\"NFe" + "2".repeat(44) + "\"><ide><nNF>1</nNF><dhEmi>2020-01-01T00:00:00-03:00</dhEmi></ide></infNFe></NFe></nfeProc>")).toThrow();
+  });
+
+  it("lança em XML sem nNF/dhEmi", () => {
+    const semIde = '<nfeProc><NFe><infNFe Id="NFe' + "2".repeat(44) + '"><ide></ide></infNFe></NFe></nfeProc>';
+    expect(() => parseNfceXml(semIde)).toThrow();
   });
 });
