@@ -24,6 +24,7 @@ describe("extrairChave", () => {
     expect(r?.chave).toBe(CHAVE_SP);
     expect(r?.uf).toBe("35");
     expect(r?.url).toContain("nfce.fazenda.sp.gov.br");
+    expect(r?.ufSuportada).toBe(true);
   });
 
   it("aceita URL de QR do portal SP e extrai a chave do param p", () => {
@@ -31,6 +32,7 @@ describe("extrairChave", () => {
     const r = extrairChave(url);
     expect(r?.chave).toBe(CHAVE_SP);
     expect(r?.url).toBe(url);
+    expect(r?.ufSuportada).toBe(true);
   });
 
   it("chave PE crua: UF suportada, mas sem url (PE só via QR)", () => {
