@@ -16,6 +16,7 @@ function comDV(base43: string): string {
 }
 const CHAVE_SP = comDV("35" + "2106".padEnd(41, "7").slice(0, 41)); // 43 dígitos, começa com 35
 const CHAVE_PE = comDV("26" + "2106".padEnd(41, "7").slice(0, 41)); // UF 26 = PE
+const CHAVE_RJ = comDV("33" + "2106".padEnd(41, "7").slice(0, 41)); // UF 33 = RJ (fora do registro)
 
 describe("extrairChave", () => {
   it("aceita 44 dígitos crus de SP", () => {
@@ -32,9 +33,26 @@ describe("extrairChave", () => {
     expect(r?.url).toBe(url);
   });
 
-  it("chave de outra UF resolve mas sem url (não-SP)", () => {
+  it("chave PE crua: UF suportada, mas sem url (PE só via QR)", () => {
     const r = extrairChave(CHAVE_PE);
     expect(r?.uf).toBe("26");
+    expect(r?.url).toBeNull();
+    expect(r?.ufSuportada).toBe(true);
+  });
+
+  it("aceita URL do portal PE e mantém a url (host na allowlist)", () => {
+    const url = `https://nfce.sefaz.pe.gov.br:444/nfce-web/consultarNFCe?p=${CHAVE_PE}|2|1|1|ABCDEF`;
+    const r = extrairChave(url);
+    expect(r?.chave).toBe(CHAVE_PE);
+    expect(r?.uf).toBe("26");
+    expect(r?.url).toBe(url);
+    expect(r?.ufSuportada).toBe(true);
+  });
+
+  it("UF fora do registro (RJ) → ufSuportada false", () => {
+    const r = extrairChave(CHAVE_RJ);
+    expect(r?.uf).toBe("33");
+    expect(r?.ufSuportada).toBe(false);
     expect(r?.url).toBeNull();
   });
 

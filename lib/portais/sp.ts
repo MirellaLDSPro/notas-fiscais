@@ -1,6 +1,30 @@
-export const SP_NFCE_HOSTS = ["www.nfce.fazenda.sp.gov.br", "nfce.fazenda.sp.gov.br"];
+export type PortalUF = {
+  uf: string;
+  hosts: string[]; // hostnames sem porta (u.hostname já remove a porta)
+  urlFromChave: (chave: string) => string | null;
+};
 
-export type ChaveResolvida = { chave: string; uf: string; url: string | null };
+// Registro de portais por UF. Adicionar um estado = adicionar uma entrada.
+export const PORTAIS: Record<string, PortalUF> = {
+  "35": {
+    uf: "35",
+    hosts: ["www.nfce.fazenda.sp.gov.br", "nfce.fazenda.sp.gov.br"],
+    urlFromChave: (c) => `https://www.nfce.fazenda.sp.gov.br/qrcode?p=${c}`,
+  },
+  "26": {
+    uf: "26",
+    hosts: ["nfce.sefaz.pe.gov.br"],
+    urlFromChave: () => null, // PE: só via QR/URL (precisa do hash assinado)
+  },
+};
+
+function portalPorHost(hostname: string): PortalUF | null {
+  const h = hostname.toLowerCase();
+  for (const p of Object.values(PORTAIS)) if (p.hosts.includes(h)) return p;
+  return null;
+}
+
+export type ChaveResolvida = { chave: string; uf: string; url: string | null; ufSuportada: boolean };
 
 function digitoVerificadorOk(chave: string): boolean {
   if (chave.length !== 44 || !/^\d{44}$/.test(chave)) return false;
@@ -22,7 +46,7 @@ export function extrairChave(input: string): ChaveResolvida | null {
   if (!trimmed) return null;
 
   let chave = "";
-  let urlSp: string | null = null;
+  let urlAllowlisted: string | null = null;
   let fromUrl = false;
 
   if (/^https?:\/\//i.test(trimmed)) {
@@ -33,24 +57,23 @@ export function extrairChave(input: string): ChaveResolvida | null {
     } catch {
       return null;
     }
-    const isSp = SP_NFCE_HOSTS.includes(u.hostname.toLowerCase());
+    const portal = portalPorHost(u.hostname);
     const p = u.searchParams.get("p") ?? "";
     chave =
       p.split("|")[0].replace(/\D/g, "").match(/\d{44}/)?.[0] ??
       trimmed.replace(/\D/g, "").match(/\d{44}/)?.[0] ??
       "";
-    if (isSp) urlSp = trimmed;
+    // Só mantém a URL se o host estiver na allowlist (anti-SSRF).
+    if (portal) urlAllowlisted = trimmed;
   } else {
     chave = trimmed.replace(/\D/g, "").match(/\d{44}/)?.[0] ?? "";
   }
 
   if (!digitoVerificadorOk(chave)) return null;
   const uf = chave.slice(0, 2);
-  // urlSp: URL de host SP que o usuário forneceu. Caso contrário, só montamos a
-  // URL canônica SP a partir de chave CRUA (não de uma URL de host não-SP).
-  const url =
-    urlSp ?? (!fromUrl && uf === "35" ? `https://www.nfce.fazenda.sp.gov.br/qrcode?p=${chave}` : null);
-  return { chave, uf, url };
+  const portal = PORTAIS[uf] ?? null;
+  const url = urlAllowlisted ?? (!fromUrl && portal ? portal.urlFromChave(chave) : null);
+  return { chave, uf, url, ufSuportada: portal !== null };
 }
 
 export type FetchResult =
