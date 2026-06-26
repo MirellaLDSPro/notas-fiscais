@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { auth, userIdFromSession } from "@/auth";
 import { NotaParseError } from "@/lib/parseNfce";
 import { parseNfceHtml } from "@/lib/parseMhtNfce";
+import { parseNfceXml, looksLikeNfeXml } from "@/lib/parseNfceXml";
 import { parseNfceTextViaClaude } from "@/lib/ocrNfce";
 import { extrairChave, buscarHtml } from "@/lib/portais/sp";
 import {
@@ -62,11 +63,18 @@ export async function POST(request: Request) {
       message: "Não reconheci uma NFC-e válida nesse QR/chave.",
     });
   }
-  if (resolved.uf !== "35" || !resolved.url) {
+  if (!resolved.ufSuportada) {
     return NextResponse.json({
       status: "unsupported_uf",
       uf: resolved.uf,
-      message: "Por enquanto a busca automática cobre só São Paulo. Use o envio de arquivo.",
+      message: "Por enquanto a busca automática cobre São Paulo e Pernambuco. Use o envio de arquivo.",
+    });
+  }
+  if (!resolved.url) {
+    return NextResponse.json({
+      status: "invalid",
+      message:
+        "Escaneie o QR Code da nota (a chave digitada não dá pra buscar automaticamente) ou envie o arquivo.",
     });
   }
 
@@ -99,7 +107,10 @@ export async function POST(request: Request) {
   let nota: ParsedNota;
   let fonte = "BUSCA";
   try {
-    nota = { ...parseNfceHtml(fetched.html), fonte: "BUSCA" };
+    const parsed = looksLikeNfeXml(fetched.html)
+      ? parseNfceXml(fetched.html)
+      : parseNfceHtml(fetched.html);
+    nota = { ...parsed, fonte: "BUSCA" };
   } catch (err) {
     const claude = await parseNfceTextViaClaude(fetched.html);
     if (claude.ok) {

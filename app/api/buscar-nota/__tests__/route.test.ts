@@ -6,6 +6,10 @@ const fixtureHtml = readFileSync(
   resolve(__dirname, "../../../../lib/__tests__/fixtures/nfce-sp.html"),
   "utf8"
 );
+const fixtureXml = readFileSync(
+  resolve(__dirname, "../../../../lib/__tests__/fixtures/nfce-pe.xml"),
+  "utf8"
+);
 
 const CHAVE = "35".padEnd(44, "1"); // valor só para o mock; extrairChave é mockado
 
@@ -47,6 +51,7 @@ beforeEach(() => {
     chave: CHAVE,
     uf: "35",
     url: "https://www.nfce.fazenda.sp.gov.br/qrcode?p=x",
+    ufSuportada: true,
   });
   (notaExistsByChave as any).mockResolvedValue(false);
   (upsertNota as any).mockResolvedValue({ id: 10, action: "inserted" });
@@ -59,10 +64,34 @@ describe("POST /api/buscar-nota", () => {
     expect((await res.json()).status).toBe("invalid");
   });
 
-  it("UF não-SP → unsupported_uf", async () => {
-    (extrairChave as any).mockReturnValue({ chave: CHAVE, uf: "26", url: null });
+  it("UF fora do registro (RJ) → unsupported_uf", async () => {
+    (extrairChave as any).mockReturnValue({ chave: CHAVE, uf: "33", url: null, ufSuportada: false });
     const res = await POST(req({ input: "x" }));
     expect((await res.json()).status).toBe("unsupported_uf");
+    expect(buscarHtml).not.toHaveBeenCalled();
+  });
+
+  it("chave PE digitada (UF ok, sem url) → invalid, sem buscar", async () => {
+    (extrairChave as any).mockReturnValue({ chave: CHAVE, uf: "26", url: null, ufSuportada: true });
+    const res = await POST(req({ input: "x" }));
+    expect((await res.json()).status).toBe("invalid");
+    expect(buscarHtml).not.toHaveBeenCalled();
+  });
+
+  it("URL PE → XML parseado deterministicamente → ok/inserted, fonte BUSCA", async () => {
+    (extrairChave as any).mockReturnValue({
+      chave: CHAVE,
+      uf: "26",
+      url: "https://nfce.sefaz.pe.gov.br:444/nfce-web/consultarNFCe?p=x",
+      ufSuportada: true,
+    });
+    (buscarHtml as any).mockResolvedValue({ ok: true, html: fixtureXml });
+    const res = await POST(req({ input: "x" }));
+    const body = await res.json();
+    expect(body.status).toBe("ok");
+    expect(body.action).toBe("inserted");
+    expect(body.fonte).toBe("BUSCA");
+    expect(body.nota.itens).toBe(4);
   });
 
   it("nota já existente → ok/exists, sem buscar", async () => {
