@@ -191,7 +191,7 @@ export default function UploadDropzone() {
 
       <div style={{ marginTop: 10 }}>
         <label style={{ fontSize: 12, color: C.muted, display: "block", marginBottom: 6 }}>
-          Ou cole a URL do QR Code ou a chave de acesso (44 dígitos):
+          Cole a URL do QR Code (SP/PE) ou a chave de 44 dígitos (SP). Para PE, escaneie o QR.
         </label>
         <PasteBuscaField onBuscar={buscarNota} busy={busy} />
       </div>
@@ -285,7 +285,7 @@ function PasteBuscaField({ onBuscar, busy }: { onBuscar: (v: string) => void; bu
         onKeyDown={(e) => {
           if (e.key === "Enter") onBuscar(v);
         }}
-        placeholder="https://www.nfce.fazenda.sp.gov.br/qrcode?p=…  ou  3526…"
+        placeholder="URL do QR (SP/PE) ou chave de 44 dígitos (SP)"
         disabled={busy}
         style={{
           flex: 1,
