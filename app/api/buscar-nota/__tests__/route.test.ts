@@ -67,14 +67,18 @@ describe("POST /api/buscar-nota", () => {
   it("UF fora do registro (RJ) → unsupported_uf", async () => {
     (extrairChave as any).mockReturnValue({ chave: CHAVE, uf: "33", url: null, ufSuportada: false });
     const res = await POST(req({ input: "x" }));
-    expect((await res.json()).status).toBe("unsupported_uf");
+    const body = await res.json();
+    expect(body.status).toBe("unsupported_uf");
+    expect(body.message).toContain("Pernambuco");
     expect(buscarHtml).not.toHaveBeenCalled();
   });
 
   it("chave PE digitada (UF ok, sem url) → invalid, sem buscar", async () => {
     (extrairChave as any).mockReturnValue({ chave: CHAVE, uf: "26", url: null, ufSuportada: true });
     const res = await POST(req({ input: "x" }));
-    expect((await res.json()).status).toBe("invalid");
+    const body = await res.json();
+    expect(body.status).toBe("invalid");
+    expect(body.message).toContain("Escaneie o QR");
     expect(buscarHtml).not.toHaveBeenCalled();
   });
 
