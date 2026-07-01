@@ -34,6 +34,7 @@ vi.mock("@/lib/db", () => ({
 import { POST } from "@/app/api/buscar-nota/route";
 import { extrairChave, buscarHtml } from "@/lib/portais/sp";
 import { notaExistsByChave, upsertNota, recordNotaErro } from "@/lib/db";
+import { parseNfceTextViaClaude } from "@/lib/ocrNfce";
 
 function req(body: unknown) {
   return new Request("http://t/api/buscar-nota", {
@@ -122,6 +123,27 @@ describe("POST /api/buscar-nota", () => {
     expect(body.action).toBe("inserted");
     expect(body.fonte).toBe("BUSCA");
     expect(upsertNota).toHaveBeenCalledOnce();
+  });
+
+  it("envelope de erro da SEFAZ (PE recusou o QR) → error específico, grava erro, NÃO chama IA", async () => {
+    (extrairChave as any).mockReturnValue({
+      chave: CHAVE,
+      uf: "26",
+      url: "https://nfce.sefaz.pe.gov.br:444/nfce-web/consultarNFCe?p=x",
+      ufSuportada: true,
+    });
+    const erroEnvelope =
+      '<?xml version="1.0" encoding="UTF-8"?>' +
+      '<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">' +
+      "<erro>100</erro><consulta>0</consulta><dataHora>30/06/2026 18:38:55</dataHora></nfeProc>";
+    (buscarHtml as any).mockResolvedValue({ ok: true, html: erroEnvelope });
+    const res = await POST(req({ input: "x" }));
+    const body = await res.json();
+    expect(body.status).toBe("error");
+    expect(body.message).toMatch(/QR|Fazenda|SEFAZ/i);
+    expect(parseNfceTextViaClaude).not.toHaveBeenCalled();
+    expect(recordNotaErro).toHaveBeenCalledOnce();
+    expect(upsertNota).not.toHaveBeenCalled();
   });
 
   it("parse falha e IA falha → error + recordNotaErro", async () => {

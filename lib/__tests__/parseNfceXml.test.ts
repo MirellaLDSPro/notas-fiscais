@@ -36,4 +36,17 @@ describe("parseNfceXml", () => {
     const semIde = '<nfeProc><NFe><infNFe Id="NFe' + "2".repeat(44) + '"><ide></ide></infNFe></NFe></nfeProc>';
     expect(() => parseNfceXml(semIde)).toThrow();
   });
+
+  it("identifica o envelope de erro da consulta SEFAZ (sem NFe) com mensagem clara", () => {
+    // resposta real da SEFAZ-PE quando o QR não é aceito / nota indisponível:
+    // <nfeProc> só com <erro>NNN</erro>, sem <proc>/<NFe>/<infNFe>
+    const erroEnvelope =
+      '<?xml version="1.0" encoding="UTF-8"?>' +
+      '<?xml-stylesheet type="text/xsl" href="xsl/an/NFCe_2.xsl"?>' +
+      '<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">' +
+      "<erro>100</erro><consulta>0</consulta><dataHora>30/06/2026 18:38:55</dataHora></nfeProc>";
+    expect(() => parseNfceXml(erroEnvelope)).toThrow(/SEFAZ retornou erro 100/i);
+    // não pode cair na mensagem genérica enganosa
+    expect(() => parseNfceXml(erroEnvelope)).not.toThrow(/sem nNF\/dhEmi/i);
+  });
 });

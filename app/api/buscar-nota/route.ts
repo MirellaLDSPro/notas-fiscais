@@ -3,7 +3,12 @@ import { createHash } from "node:crypto";
 import { auth, userIdFromSession } from "@/auth";
 import { NotaParseError } from "@/lib/parseNfce";
 import { parseNfceHtml } from "@/lib/parseMhtNfce";
-import { parseNfceXml, looksLikeNfeXml } from "@/lib/parseNfceXml";
+import {
+  parseNfceXml,
+  looksLikeNfeXml,
+  consultaErroSefaz,
+  mensagemErroSefaz,
+} from "@/lib/parseNfceXml";
 import { parseNfceTextViaClaude } from "@/lib/ocrNfce";
 import { extrairChave, buscarHtml } from "@/lib/portais/sp";
 import {
@@ -101,6 +106,20 @@ export async function POST(request: Request) {
       status: "error",
       url: resolved.url,
       message: "Não consegui buscar a nota agora. Tente o envio de arquivo.",
+    });
+  }
+
+  // A SEFAZ respondeu, mas com um envelope de erro (sem a NFe) — ex.: PE quando
+  // o QR não é aceito/expirou. Reporta o código real e nem tenta a IA (não há
+  // dados pra ler), evitando a mensagem genérica enganosa.
+  const erroSefaz = consultaErroSefaz(fetched.html);
+  if (erroSefaz) {
+    await safeRecordErro(userId, resolved.chave, mensagemErroSefaz(erroSefaz));
+    return NextResponse.json({
+      status: "error",
+      url: resolved.url,
+      message:
+        "A Fazenda não retornou essa nota pelo QR (pode estar indisponível ou o QR expirou). Envie o arquivo da nota.",
     });
   }
 
