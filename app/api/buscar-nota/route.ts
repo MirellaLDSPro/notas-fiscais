@@ -21,11 +21,16 @@ import {
 
 export const runtime = "nodejs";
 
+// Limite do payload cru guardado em notas_erros. O envelope de erro da SEFAZ é
+// pequeno (~240 B); um DANFE/HTML pode ser grande — trunca pra não inchar a linha.
+const MAX_RAW = 8000;
+
 async function safeRecordErro(
   userId: number,
   chave: string,
   erro: string,
-  numero: string | null = null
+  numero: string | null = null,
+  parsedPartial: Record<string, unknown> | null = null
 ) {
   try {
     await recordNotaErro(userId, {
@@ -34,7 +39,7 @@ async function safeRecordErro(
       numero,
       chave_acesso: chave,
       file_sha256: createHash("sha256").update(chave).digest("hex"),
-      parsed_partial: null,
+      parsed_partial: parsedPartial,
     });
   } catch (e) {
     console.error("[buscar-nota] recordNotaErro falhou:", e);
@@ -114,7 +119,10 @@ export async function POST(request: Request) {
   // dados pra ler), evitando a mensagem genérica enganosa.
   const erroSefaz = consultaErroSefaz(fetched.html);
   if (erroSefaz) {
-    await safeRecordErro(userId, resolved.chave, mensagemErroSefaz(erroSefaz));
+    await safeRecordErro(userId, resolved.chave, mensagemErroSefaz(erroSefaz), null, {
+      sefaz_erro: erroSefaz,
+      raw: fetched.html.slice(0, MAX_RAW),
+    });
     return NextResponse.json({
       status: "error",
       url: resolved.url,
@@ -141,7 +149,8 @@ export async function POST(request: Request) {
         userId,
         resolved.chave,
         err instanceof Error ? err.message : "Parse falhou",
-        hint.numero ?? null
+        hint.numero ?? null,
+        { raw: fetched.html.slice(0, MAX_RAW) }
       );
       return NextResponse.json({
         status: "error",

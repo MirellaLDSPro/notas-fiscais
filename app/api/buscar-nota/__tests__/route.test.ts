@@ -144,12 +144,18 @@ describe("POST /api/buscar-nota", () => {
     expect(parseNfceTextViaClaude).not.toHaveBeenCalled();
     expect(recordNotaErro).toHaveBeenCalledOnce();
     expect(upsertNota).not.toHaveBeenCalled();
+    // instrumentação: guarda o código da SEFAZ + o envelope cru pra diagnóstico
+    const partial = (recordNotaErro as any).mock.calls[0][1].parsed_partial;
+    expect(partial).toMatchObject({ sefaz_erro: "100" });
+    expect(partial.raw).toContain("<erro>100</erro>");
   });
 
-  it("parse falha e IA falha → error + recordNotaErro", async () => {
+  it("parse falha e IA falha → error + recordNotaErro com o payload cru", async () => {
     (buscarHtml as any).mockResolvedValue({ ok: true, html: "<html>lixo</html>" });
     const res = await POST(req({ input: "x" }));
     expect((await res.json()).status).toBe("error");
     expect(recordNotaErro).toHaveBeenCalledOnce();
+    const partial = (recordNotaErro as any).mock.calls[0][1].parsed_partial;
+    expect(partial.raw).toContain("lixo");
   });
 });
