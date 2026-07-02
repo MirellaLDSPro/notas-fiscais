@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { ListaCompraItem } from "@/lib/db";
+import { previstoTotal } from "@/lib/listaCompras";
 
 const C = {
   bg: "#0d0f0e",
@@ -61,6 +62,7 @@ export default function Checklist({ items }: { items: ListaCompraItem[] }) {
 
   const totalChecked = Object.values(checked).filter(Boolean).length;
   const totalItems = items.length;
+  const previsto = previstoTotal(items);
 
   if (items.length === 0) {
     return (
@@ -92,16 +94,25 @@ export default function Checklist({ items }: { items: ListaCompraItem[] }) {
           flexWrap: "wrap",
         }}
       >
-        <div style={{ fontSize: 13, color: C.muted }}>
-          {hydrated ? (
-            <>
-              <span style={{ color: C.accent2, fontWeight: 600 }}>{totalChecked}</span>
-              {" / "}
-              {totalItems} marcados
-            </>
-          ) : (
-            <>{totalItems} categorias</>
-          )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <div style={{ fontSize: 13, color: C.muted }}>
+            {hydrated ? (
+              <>
+                <span style={{ color: C.accent2, fontWeight: 600 }}>{totalChecked}</span>
+                {" / "}
+                {totalItems} marcados
+              </>
+            ) : (
+              <>{totalItems} categorias</>
+            )}
+          </div>
+          <div
+            style={{ fontSize: 13, color: C.muted }}
+            title="Estimativa: 1 un. de cada categoria pelo preço médio"
+          >
+            Previsto do total{" "}
+            <span style={{ color: C.accent, fontWeight: 700 }}>~ {fmtBRL(previsto)}</span>
+          </div>
         </div>
         {hydrated && totalChecked > 0 && (
           <button
