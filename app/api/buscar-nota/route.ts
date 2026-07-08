@@ -3,7 +3,12 @@ import { createHash } from "node:crypto";
 import { auth, userIdFromSession } from "@/auth";
 import { NotaParseError } from "@/lib/parseNfce";
 import { parseNfceHtml } from "@/lib/parseMhtNfce";
-import { parseNfceXml, looksLikeNfeXml } from "@/lib/parseNfceXml";
+import {
+  parseNfceXml,
+  looksLikeNfeXml,
+  consultaErroSefaz,
+  mensagemErroSefaz,
+} from "@/lib/parseNfceXml";
 import { parseNfceTextViaClaude } from "@/lib/ocrNfce";
 import { extrairChave, buscarHtml } from "@/lib/portais/sp";
 import {
@@ -16,11 +21,16 @@ import {
 
 export const runtime = "nodejs";
 
+// Limite do payload cru guardado em notas_erros. O envelope de erro da SEFAZ é
+// pequeno (~240 B); um DANFE/HTML pode ser grande — trunca pra não inchar a linha.
+const MAX_RAW = 8000;
+
 async function safeRecordErro(
   userId: number,
   chave: string,
   erro: string,
-  numero: string | null = null
+  numero: string | null = null,
+  parsedPartial: Record<string, unknown> | null = null
 ) {
   try {
     await recordNotaErro(userId, {
@@ -29,7 +39,7 @@ async function safeRecordErro(
       numero,
       chave_acesso: chave,
       file_sha256: createHash("sha256").update(chave).digest("hex"),
-      parsed_partial: null,
+      parsed_partial: parsedPartial,
     });
   } catch (e) {
     console.error("[buscar-nota] recordNotaErro falhou:", e);
@@ -104,6 +114,23 @@ export async function POST(request: Request) {
     });
   }
 
+  // A SEFAZ respondeu, mas com um envelope de erro (sem a NFe) — ex.: PE quando
+  // o QR não é aceito/expirou. Reporta o código real e nem tenta a IA (não há
+  // dados pra ler), evitando a mensagem genérica enganosa.
+  const erroSefaz = consultaErroSefaz(fetched.html);
+  if (erroSefaz) {
+    await safeRecordErro(userId, resolved.chave, mensagemErroSefaz(erroSefaz), null, {
+      sefaz_erro: erroSefaz,
+      raw: fetched.html.slice(0, MAX_RAW),
+    });
+    return NextResponse.json({
+      status: "error",
+      url: resolved.url,
+      message:
+        "A Fazenda não retornou essa nota pelo QR (pode estar indisponível ou o QR expirou). Envie o arquivo da nota.",
+    });
+  }
+
   let nota: ParsedNota;
   let fonte = "BUSCA";
   try {
@@ -122,7 +149,8 @@ export async function POST(request: Request) {
         userId,
         resolved.chave,
         err instanceof Error ? err.message : "Parse falhou",
-        hint.numero ?? null
+        hint.numero ?? null,
+        { raw: fetched.html.slice(0, MAX_RAW) }
       );
       return NextResponse.json({
         status: "error",

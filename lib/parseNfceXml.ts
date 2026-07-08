@@ -20,8 +20,33 @@ export function looksLikeNfeXml(s: string): boolean {
   return /<nfeProc[\s>]|<NFe[\s>]|<infNFe[\s>]/i.test(s);
 }
 
+// A consulta pública da SEFAZ pode devolver um envelope <nfeProc> só com
+// <erro>NNN</erro> (sem <infNFe>) quando não serve a nota — ex.: PE quando o QR
+// não é aceito. Retorna o código do erro nesse caso, ou null se for uma NFe real.
+export function consultaErroSefaz(xml: string): string | null {
+  if (/<infNFe[^>]*\bId="NFe\d{44}"/i.test(xml)) return null;
+  return xml.match(/<erro>\s*([^<\s][\s\S]*?)\s*<\/erro>/i)?.[1]?.trim() ?? null;
+}
+
+export function mensagemErroSefaz(codigo: string): string {
+  return `Consulta da NFC-e na SEFAZ retornou erro ${codigo} (nota não disponível para busca automática).`;
+}
+
 export function parseNfceXml(xml: string): ParsedNota {
   const chave = xml.match(/<infNFe[^>]*\bId="NFe(\d{44})"/i)?.[1] ?? null;
+
+  // Sem <infNFe> mas com <erro> preenchido: a SEFAZ devolveu um envelope de
+  // erro (ex.: PE quando o QR não é aceito), não a nota. Reporta o código real
+  // em vez da mensagem genérica enganosa "sem nNF/dhEmi".
+  if (!chave) {
+    const erro = consultaErroSefaz(xml);
+    if (erro) {
+      throw new NotaParseError(mensagemErroSefaz(erro), {
+        numero: null,
+        chave_acesso: null,
+      });
+    }
+  }
 
   const ide = xml.match(/<ide>([\s\S]*?)<\/ide>/i)?.[1] ?? "";
   const numero = tag(ide, "nNF");
